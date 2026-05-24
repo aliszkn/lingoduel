@@ -1,0 +1,3740 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../core/app_colors.dart';
+import '../services/app_settings.dart';
+import '../data/word_pool.dart';
+import 'game_screen.dart';
+
+// ==========================================
+// --- PANELLER ARASI GEÇİŞ (ANA YAPI) ---
+// ==========================================
+class AnaKontrolMerkezi extends StatefulWidget {
+  const AnaKontrolMerkezi({super.key});
+
+  @override
+  State<AnaKontrolMerkezi> createState() => _AnaKontrolMerkeziState();
+}
+
+class _AnaKontrolMerkeziState extends State<AnaKontrolMerkezi> {
+  int aktifPanel = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          IndexedStack(
+            index: aktifPanel,
+            children: const [CardsPanel(), ProfilePanel(), DuelPanel()],
+          ),
+          Positioned(
+            bottom: 30,
+            left: 30,
+            right: 30,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.yuzey,
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _navButon(Icons.bolt_rounded, "Cards", 0, AppColors.cyan),
+                  _navButon(Icons.person_rounded, "Profile", 1, AppColors.sari),
+                  _navButon(Icons.bolt_rounded, "Duel", 2, AppColors.kirmizi),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _navButon(IconData icon, String etiket, int index, Color aktifRenk) {
+    final bool seciliMi = aktifPanel == index;
+    return GestureDetector(
+      onTap: () {
+        AppSettings.lightImpact();
+        setState(() => aktifPanel = index);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: seciliMi
+              ? aktifRenk.withValues(alpha: 0.15)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: seciliMi ? aktifRenk : Colors.white24, size: 26),
+            if (seciliMi) const SizedBox(width: 6),
+            if (seciliMi)
+              Text(
+                etiket,
+                style: TextStyle(
+                  color: aktifRenk,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// --- PANEL 1: LINGO CARDS (ÖĞRENME) ---
+// ==========================================
+class CardsPanel extends StatefulWidget {
+  const CardsPanel({super.key});
+
+  @override
+  State<CardsPanel> createState() => _CardsPanelState();
+}
+
+class _CardsPanelState extends State<CardsPanel> {
+  String secilenSeviye = 'A';
+  int secilenSayi = 3;
+  int secilenKapsam = 100;
+
+  List<Map<String, dynamic>> ekrandakiKelimeler = [];
+
+  /// Seviye + kapsam → WordPool lig kodu (örn. A + 250 → 'A250', C + 1000 → 'C1K').
+  String get _ligKodu =>
+      '$secilenSeviye${secilenKapsam == 1000 ? '1K' : secilenKapsam}';
+
+  @override
+  void initState() {
+    super.initState();
+    kelimeleriGetir();
+  }
+
+  void kelimeleriGetir() {
+    final havuz = WordPool.forLeague(_ligKodu).map((w) => w.toMap()).toList()
+      ..shuffle();
+    int miktar = secilenSayi;
+    if (miktar > havuz.length) miktar = havuz.length;
+    setState(() {
+      ekrandakiKelimeler = havuz.isEmpty ? [] : havuz.sublist(0, miktar);
+    });
+  }
+
+  void tekKelimeDegistir(int index) {
+    AppSettings.selectionClick();
+    final havuz = WordPool.forLeague(_ligKodu).map((w) => w.toMap()).toList()
+      ..shuffle();
+    if (havuz.isEmpty) return;
+    setState(() {
+      ekrandakiKelimeler[index] = havuz.first;
+    });
+  }
+
+  Widget _secimButonu(String yazi, bool seciliMi, VoidCallback tiklama) {
+    return GestureDetector(
+      onTap: tiklama,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(right: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: seciliMi ? AppColors.cyan : AppColors.butonArka,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: seciliMi ? AppColors.cyan : Colors.white12),
+        ),
+        child: Text(
+          yazi,
+          style: TextStyle(
+            color: seciliMi ? Colors.black : Colors.white60,
+            fontWeight: FontWeight.w900,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 60, 24, 0),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.cyan.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.bolt_rounded,
+                  color: AppColors.cyan,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Lingo',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                  letterSpacing: -1,
+                ),
+              ),
+              const Text(
+                'Cards',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w300,
+                  color: AppColors.cyan,
+                  letterSpacing: -1,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(24, 15, 24, 6),
+          child: Text(
+            'SEVİYE',
+            style: TextStyle(
+              color: Colors.white24,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+            ),
+          ),
+        ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Row(
+            children: [
+              for (String s in ['A', 'B', 'C'])
+                _secimButonu(s, secilenSeviye == s, () {
+                  setState(() {
+                    secilenSeviye = s;
+                    kelimeleriGetir();
+                  });
+                }),
+            ],
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(24, 15, 24, 6),
+          child: Text(
+            'KAPSAM (POPÜLERLİK)',
+            style: TextStyle(
+              color: Colors.white24,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+            ),
+          ),
+        ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Row(
+            children: [
+              for (int k in [100, 250, 500, 1000])
+                _secimButonu(
+                  k == 1000 ? 'İlk 1K' : 'İlk $k',
+                  secilenKapsam == k,
+                  () {
+                    setState(() {
+                      secilenKapsam = k;
+                      kelimeleriGetir();
+                    });
+                  },
+                ),
+            ],
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(24, 15, 24, 6),
+          child: Text(
+            'ADET',
+            style: TextStyle(
+              color: Colors.white24,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Row(
+            children: [
+              for (int n in [1, 3, 5])
+                _secimButonu('$n Kelime', secilenSayi == n, () {
+                  setState(() {
+                    secilenSayi = n;
+                    kelimeleriGetir();
+                  });
+                }),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+            itemCount: ekrandakiKelimeler.length,
+            itemBuilder: (context, index) {
+              return KelimeKarti(
+                key: ValueKey(ekrandakiKelimeler[index]['en'] + secilenSeviye),
+                data: ekrandakiKelimeler[index],
+                onNewWord: () => tekKelimeDegistir(index),
+                temaRengi: AppColors.cyan,
+                golgeRengi: AppColors.cyanKoyu,
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ==========================================
+// --- PANEL 2: PROFİL VE SOSYAL PANEL ---
+// ==========================================
+class ProfilePanel extends StatefulWidget {
+  const ProfilePanel({super.key});
+
+  @override
+  State<ProfilePanel> createState() => _ProfilePanelState();
+}
+
+class _ProfilePanelState extends State<ProfilePanel>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  IconData aktifAvatar = Icons.person_rounded;
+
+  Map<String, Map<String, dynamic>> tumKullanicilar = {
+    'Ahmet_Can': {'durum': 'Çevrimiçi', 'aktif': true, 'isDuel': false},
+    'Zeynep01': {'durum': 'Düelloda', 'aktif': false, 'isDuel': true},
+    'MehmetK': {
+      'durum': 'Son görülme 2 saat önce',
+      'aktif': false,
+      'isDuel': false,
+    },
+    'Selin_Ay': {'durum': 'Çevrimiçi', 'aktif': true, 'isDuel': false},
+    'Kemal_X': {'durum': 'A Ligi Düellosu', 'aktif': false, 'isDuel': false},
+    'AyseV': {'durum': 'B Ligi Zamana Karşı', 'aktif': true, 'isDuel': false},
+    'Mert_Oynuyor': {
+      'durum': 'Telefon Rehberinden',
+      'aktif': true,
+      'isDuel': false,
+    },
+    'Ceren99': {
+      'durum': 'Telefon Rehberinden',
+      'aktif': false,
+      'isDuel': false,
+    },
+  };
+
+  List<String> arkadasListem = ['Ahmet_Can', 'Zeynep01', 'MehmetK'];
+  List<String> engellenenListem = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _ayarlariAc() {
+    AppSettings.mediumImpact();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const AyarlarEkrani()),
+    );
+  }
+
+  void _postaPaneliAc() {
+    AppSettings.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const PostaKutusuModal(),
+    );
+  }
+
+  void _sohbetPaneliAc(String isim) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => SohbetEkrani(
+        isim: isim,
+        arkadasMi: arkadasListem.contains(isim),
+        data: tumKullanicilar[isim],
+        onArkadasEkle: () => setState(() {
+          if (!arkadasListem.contains(isim)) arkadasListem.add(isim);
+        }),
+        onArkadasCikar: () => setState(() => arkadasListem.remove(isim)),
+        onEngelle: () => setState(() {
+          arkadasListem.remove(isim);
+          if (!engellenenListem.contains(isim)) engellenenListem.add(isim);
+        }),
+      ),
+    );
+  }
+
+  void _avatarSeciciAc() {
+    AppSettings.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: 400,
+        decoration: const BoxDecoration(
+          color: AppColors.arkaPlan,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
+          ),
+        ),
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 20),
+              width: 50,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            const Text(
+              "Avatar Seç",
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: GridView.count(
+                crossAxisCount: 4,
+                padding: const EdgeInsets.all(24),
+                mainAxisSpacing: 20,
+                crossAxisSpacing: 20,
+                children: [
+                  _avatarSecenek(Icons.person_rounded),
+                  _avatarSecenek(Icons.sentiment_satisfied_alt_rounded),
+                  _avatarSecenek(Icons.local_fire_department_rounded),
+                  _avatarSecenek(Icons.cruelty_free_rounded),
+                  _avatarSecenek(Icons.rocket_launch_rounded),
+                  _avatarSecenek(Icons.ac_unit_rounded),
+                  _avatarSecenek(Icons.sports_esports_rounded),
+                  _avatarSecenek(Icons.pets_rounded),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+              child: GestureDetector(
+                onTap: () {
+                  final messenger = ScaffoldMessenger.of(context);
+                  Navigator.pop(context);
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text("Galeriden seçme özelliği yakında!"),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.yuzey,
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.photo_library_rounded, color: Colors.white60),
+                      SizedBox(width: 8),
+                      Text(
+                        "Galeriden Yükle",
+                        style: TextStyle(
+                          color: Colors.white60,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _avatarSecenek(IconData ikon) {
+    final bool secili = aktifAvatar == ikon;
+    return GestureDetector(
+      onTap: () {
+        AppSettings.selectionClick();
+        setState(() => aktifAvatar = ikon);
+        Navigator.pop(context);
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: secili
+              ? AppColors.sari.withValues(alpha: 0.2)
+              : AppColors.yuzey,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: secili ? AppColors.sari : Colors.white10,
+            width: 2,
+          ),
+        ),
+        child: Icon(
+          ikon,
+          color: secili ? AppColors.sari : Colors.white,
+          size: 30,
+        ),
+      ),
+    );
+  }
+
+  void _arkadasEklePaneliAc() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => ArkadasEkleModal(
+        tumKullanicilar: tumKullanicilar,
+        arkadasListem: arkadasListem,
+        engellenenListem: engellenenListem,
+        onEkle: (isim) => setState(() => arkadasListem.add(isim)),
+        onCikar: (isim) => setState(() => arkadasListem.remove(isim)),
+        onEngelle: (isim) {
+          setState(() {
+            arkadasListem.remove(isim);
+            if (!engellenenListem.contains(isim)) engellenenListem.add(isim);
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("$isim engellendi."),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        },
+        onEngelKaldir: (isim) => setState(() => engellenenListem.remove(isim)),
+        onMesajAc: (isim) => _sohbetPaneliAc(isim),
+      ),
+    );
+  }
+
+  void _arkadasCikarOnay(String isim) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.yuzey,
+        title: Text(
+          "$isim arkadaşlıktan çıkarılsın mı?",
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: const Text(
+          "Bu kişi arkadaş listenden silinecek. İstediğin zaman tekrar ekleyebilirsin.",
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("İPTAL", style: TextStyle(color: Colors.white38)),
+          ),
+          TextButton(
+            onPressed: () {
+              final messenger = ScaffoldMessenger.of(context);
+              Navigator.pop(dialogContext);
+              setState(() => arkadasListem.remove(isim));
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text("$isim arkadaşlıktan çıkarıldı."),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            },
+            child: const Text(
+              "ÇIKAR",
+              style: TextStyle(
+                color: AppColors.kirmizi,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _engelleSor(String isim) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.yuzey,
+        title: Text(
+          "$isim Engellensin mi?",
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: const Text(
+          "Bu kişi size mesaj atamayacak, arkadaş listesinden silinecek.",
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("İPTAL", style: TextStyle(color: Colors.white38)),
+          ),
+          TextButton(
+            onPressed: () {
+              final messenger = ScaffoldMessenger.of(context);
+              Navigator.pop(dialogContext);
+              setState(() {
+                arkadasListem.remove(isim);
+                if (!engellenenListem.contains(isim)) {
+                  engellenenListem.add(isim);
+                }
+              });
+              messenger.showSnackBar(
+                SnackBar(content: Text("$isim engellendi.")),
+              );
+            },
+            child: const Text(
+              "ENGELLE",
+              style: TextStyle(
+                color: AppColors.kirmizi,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 60, 24, 0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              GestureDetector(
+                onTap: _ayarlariAc,
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.yuzey,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.settings_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                ),
+              ),
+              GestureDetector(
+                onTap: _postaPaneliAc,
+                child: Stack(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.yuzey,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.mail_outline_rounded,
+                        color: Colors.white,
+                        size: 26,
+                      ),
+                    ),
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                          color: AppColors.kirmizi,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        GestureDetector(
+          onTap: _avatarSeciciAc,
+          child: Stack(
+            alignment: Alignment.bottomRight,
+            children: [
+              Container(
+                width: 110,
+                height: 110,
+                decoration: BoxDecoration(
+                  color: AppColors.yuzey,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.sari.withValues(alpha: 0.15),
+                      blurRadius: 20,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Icon(aktifAvatar, size: 70, color: AppColors.sari),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppColors.cyan,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.arkaPlan, width: 3),
+                ),
+                child: const Icon(
+                  Icons.edit_rounded,
+                  color: Colors.black,
+                  size: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          "LingoUstası99",
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
+          ),
+        ),
+        const Text(
+          "B LİGİ USTASI",
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+            color: AppColors.sari,
+            letterSpacing: 2,
+          ),
+        ),
+        const SizedBox(height: 25),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Row(
+            children: [
+              Expanded(
+                child: _istatistikKarti("Toplam Maç", "1,240", AppColors.cyan),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _istatistikKarti(
+                  "Kazanma Oranı",
+                  "%68",
+                  AppColors.kirmizi,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 25),
+        TabBar(
+          controller: _tabController,
+          indicatorColor: AppColors.sari,
+          labelColor: AppColors.sari,
+          unselectedLabelColor: Colors.white38,
+          tabs: const [
+            Tab(text: "Arkadaşlar"),
+            Tab(text: "Mesajlar"),
+          ],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [_buildArkadaslarSekmesi(), _buildMesajlarSekmesi()],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _istatistikKarti(String baslik, String deger, Color vurguRengi) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      decoration: BoxDecoration(
+        color: AppColors.yuzey,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        children: [
+          Text(
+            baslik,
+            style: const TextStyle(
+              color: Colors.white60,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            deger,
+            style: TextStyle(
+              color: vurguRengi,
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildArkadaslarSekmesi() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 100),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  AppSettings.mediumImpact();
+                  _arkadasEklePaneliAc();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: AppColors.sari.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(
+                      color: AppColors.sari.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.person_add_rounded,
+                        color: AppColors.sari,
+                        size: 20,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        "Arkadaş Ekle",
+                        style: TextStyle(
+                          color: AppColors.sari,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: () {
+                AppSettings.mediumImpact();
+                _engellenenlerModaliAc();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 14,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.kirmizi.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(
+                    color: AppColors.kirmizi.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.block_flipped,
+                      color: AppColors.kirmizi,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${engellenenListem.length}',
+                      style: const TextStyle(
+                        color: AppColors.kirmizi,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        for (String isim in arkadasListem) _arkadasKarti(isim),
+      ],
+    );
+  }
+
+  void _engellenenlerModaliAc() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (modalContext) => StatefulBuilder(
+        builder: (modalContext, modalSetState) => Container(
+          height: MediaQuery.of(context).size.height * 0.75,
+          decoration: const BoxDecoration(
+            color: AppColors.arkaPlan,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12, bottom: 16),
+                width: 50,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    "Engellenenler",
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Expanded(
+                child: engellenenListem.isEmpty
+                    ? const Center(
+                        child: Text(
+                          "Engellediğin kimse yok.",
+                          style: TextStyle(color: Colors.white38),
+                        ),
+                      )
+                    : ListView(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        children: [
+                          for (String isim in List<String>.from(
+                            engellenenListem,
+                          ))
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: AppColors.yuzey,
+                                borderRadius: BorderRadius.circular(15),
+                                border: Border.all(
+                                  color: AppColors.kirmizi.withValues(
+                                    alpha: 0.4,
+                                  ),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const CircleAvatar(
+                                    backgroundColor: AppColors.arkaPlan,
+                                    child: Icon(
+                                      Icons.block_flipped,
+                                      color: AppColors.kirmizi,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Text(
+                                      isim,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () {
+                                      AppSettings.mediumImpact();
+                                      setState(
+                                        () => engellenenListem.remove(isim),
+                                      );
+                                      modalSetState(() {});
+                                    },
+                                    child: const Text(
+                                      "Engeli Kaldır",
+                                      style: TextStyle(
+                                        color: Colors.greenAccent,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _arkadasKarti(String isim) {
+    final kisi = tumKullanicilar[isim];
+    if (kisi == null) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.yuzey,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: AppColors.arkaPlan,
+            child: Icon(
+              Icons.person,
+              color: kisi['aktif'] ? Colors.white : Colors.white24,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isim,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  kisi['durum'],
+                  style: TextStyle(
+                    color: kisi['isDuel']
+                        ? AppColors.kirmizi
+                        : (kisi['aktif'] ? Colors.greenAccent : Colors.white38),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded, color: Colors.white38),
+            color: AppColors.yuzey,
+            onSelected: (deger) {
+              if (deger == 'profil') {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => BaskaKullaniciProfili(
+                    isim: isim,
+                    data: kisi,
+                    isArkadas: arkadasListem.contains(isim),
+                    onArkadasEkle: () => setState(() {
+                      if (!arkadasListem.contains(isim)) {
+                        arkadasListem.add(isim);
+                      }
+                    }),
+                    onMesajAt: () => _sohbetPaneliAc(isim),
+                  ),
+                );
+              } else if (deger == 'mesaj') {
+                _sohbetPaneliAc(isim);
+              } else if (deger == 'cikar') {
+                _arkadasCikarOnay(isim);
+              } else if (deger == 'engelle') {
+                _engelleSor(isim);
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'profil',
+                child: Row(
+                  children: [
+                    Icon(Icons.account_circle_outlined, size: 18),
+                    SizedBox(width: 8),
+                    Text("Profili Gör"),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'mesaj',
+                child: Row(
+                  children: [
+                    Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                    SizedBox(width: 8),
+                    Text("Mesaj At"),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'cikar',
+                child: Row(
+                  children: [
+                    Icon(Icons.person_remove_outlined, size: 18),
+                    SizedBox(width: 8),
+                    Text("Arkadaşlıktan Çıkar"),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'engelle',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.block_flipped,
+                      size: 18,
+                      color: AppColors.kirmizi,
+                    ),
+                    SizedBox(width: 8),
+                    Text("Engelle", style: TextStyle(color: AppColors.kirmizi)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMesajlarSekmesi() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 100),
+      children: [
+        _mesajKarti("Ahmet_Can", "Rövanş atalım mı?", "12:45", okunmadi: true),
+        _mesajKarti(
+          "Zeynep01",
+          "Yeni rekorumu gördün mü?",
+          "Dün",
+          okunmadi: false,
+        ),
+      ],
+    );
+  }
+
+  Widget _mesajKarti(
+    String isim,
+    String sonMesaj,
+    String zaman, {
+    required bool okunmadi,
+  }) {
+    return GestureDetector(
+      onTap: () {
+        AppSettings.lightImpact();
+        _sohbetPaneliAc(isim);
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: okunmadi
+              ? AppColors.yuzey
+              : AppColors.yuzey.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(
+            color: okunmadi
+                ? AppColors.sari.withValues(alpha: 0.3)
+                : Colors.transparent,
+          ),
+        ),
+        child: Row(
+          children: [
+            const CircleAvatar(
+              backgroundColor: AppColors.arkaPlan,
+              child: Icon(Icons.person, color: Colors.white),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isim,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Colors.white,
+                        ),
+                      ),
+                      Text(
+                        zaman,
+                        style: TextStyle(
+                          color: okunmadi ? AppColors.sari : Colors.white38,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    sonMesaj,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: okunmadi ? Colors.white : Colors.white60,
+                      fontWeight: okunmadi
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            PopupMenuButton<String>(
+              icon: const Icon(
+                Icons.more_vert_rounded,
+                color: Colors.white38,
+                size: 20,
+              ),
+              color: AppColors.yuzey,
+              onSelected: (deger) {
+                final messenger = ScaffoldMessenger.of(context);
+                if (deger == 'okundu') {
+                  AppSettings.lightImpact();
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text("$isim sohbeti okundu işaretlendi."),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                } else if (deger == 'sessiz') {
+                  AppSettings.lightImpact();
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text("$isim sessize alındı."),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                } else if (deger == 'sil') {
+                  AppSettings.mediumImpact();
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text("$isim ile sohbet silindi."),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'okundu',
+                  child: Row(
+                    children: [
+                      Icon(Icons.mark_chat_read_outlined, size: 18),
+                      SizedBox(width: 8),
+                      Text("Okundu İşaretle"),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'sessiz',
+                  child: Row(
+                    children: [
+                      Icon(Icons.volume_off_outlined, size: 18),
+                      SizedBox(width: 8),
+                      Text("Sessize Al"),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'sil',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.delete_outline_rounded,
+                        size: 18,
+                        color: Colors.red,
+                      ),
+                      SizedBox(width: 8),
+                      Text("Sohbeti Sil", style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// --- PANEL 3: LINGO DUEL (LOBİ) ---
+// ==========================================
+class DuelPanel extends StatefulWidget {
+  const DuelPanel({super.key});
+
+  @override
+  State<DuelPanel> createState() => _DuelPanelState();
+}
+
+class _DuelPanelState extends State<DuelPanel> {
+  final Color duelRed = AppColors.kirmizi;
+  String aramaMetni = "";
+
+  List<String> seciliLigler = [
+    'A100',
+    'A250',
+    'A500',
+    'A1K',
+    'B100',
+    'B250',
+    'B500',
+    'B1K',
+    'C100',
+    'C250',
+    'C500',
+    'C1K',
+  ];
+  bool sadeceBosOdalar = false;
+  bool sifrelileriGizle = false;
+
+  List<Map<String, dynamic>> aktifOdalar = [
+    {
+      'isim': 'Çaylaklar Toplanın',
+      'lig': 'A100',
+      'dolu': 2,
+      'kapasite': 6,
+      'sifreli': false,
+    },
+    {
+      'isim': 'İngilizce Geliştirme',
+      'lig': 'B250',
+      'dolu': 6,
+      'kapasite': 6,
+      'sifreli': false,
+    },
+    {
+      'isim': 'Zamana Karşı',
+      'lig': 'A500',
+      'dolu': 4,
+      'kapasite': 6,
+      'sifreli': false,
+    },
+    {
+      'isim': 'Hızlı Maç',
+      'lig': 'C1K',
+      'dolu': 1,
+      'kapasite': 2,
+      'sifreli': false,
+    },
+    {
+      'isim': 'Arkadaşlarla Özel',
+      'lig': 'B1K',
+      'dolu': 2,
+      'kapasite': 6,
+      'sifreli': true,
+      'sifre': '1234',
+    },
+  ];
+
+  void _odaKurPaneliAc() {
+    AppSettings.heavyImpact();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (modalContext) => OdaKurModal(
+        onOdaEkle: (yeniOda) {
+          setState(() {
+            aktifOdalar.insert(0, yeniOda);
+          });
+          Future.delayed(const Duration(milliseconds: 200), () {
+            if (!mounted) return;
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => OyunOdasiEkrani(odaBilgisi: yeniOda),
+              ),
+            );
+          });
+        },
+      ),
+    );
+  }
+
+  void _filtrePaneliAc() {
+    AppSettings.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => OdaFiltreModal(
+        mevcutLigler: seciliLigler,
+        mevcutSadeceBos: sadeceBosOdalar,
+        mevcutSifresiz: sifrelileriGizle,
+        onFiltreUygula: (ligler, bos, sifresiz) {
+          setState(() {
+            seciliLigler = ligler;
+            sadeceBosOdalar = bos;
+            sifrelileriGizle = sifresiz;
+          });
+        },
+      ),
+    );
+  }
+
+  Future<void> _sifreSor(Map<String, dynamic> oda) async {
+    final bool? basarili = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => _SifreDialog(
+        odaAdi: (oda['isim'] ?? 'Şifreli Oda').toString(),
+        dogruSifre: (oda['sifre'] ?? '').toString(),
+        duelRed: duelRed,
+      ),
+    );
+    if (basarili == true && mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => OyunOdasiEkrani(odaBilgisi: oda)),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Map<String, dynamic>> gosterilecekOdalar = aktifOdalar.where((
+      oda,
+    ) {
+      final bool isimUyar = oda['isim'].toLowerCase().contains(
+        aramaMetni.toLowerCase(),
+      );
+      final bool ligUyar = seciliLigler.contains(oda['lig']);
+      final bool boslukUyar = sadeceBosOdalar
+          ? (oda['dolu'] < oda['kapasite'])
+          : true;
+      final bool sifreUyar = sifrelileriGizle
+          ? (oda['sifreli'] == false)
+          : true;
+      return isimUyar && ligUyar && boslukUyar && sifreUyar;
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 60, 24, 10),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: duelRed.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.bolt_rounded, color: duelRed, size: 28),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Lingo',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                  letterSpacing: -1,
+                ),
+              ),
+              Text(
+                'Duel',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w300,
+                  color: duelRed,
+                  letterSpacing: -1,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.yuzey,
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: TextField(
+                    onChanged: (deger) => setState(() => aramaMetni = deger),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      hintText: "Oda Ara...",
+                      hintStyle: TextStyle(color: Colors.white38),
+                      prefixIcon: Icon(
+                        Icons.search_rounded,
+                        color: Colors.white38,
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: _filtrePaneliAc,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color:
+                        (seciliLigler.length < 12 ||
+                            sadeceBosOdalar ||
+                            sifrelileriGizle)
+                        ? duelRed
+                        : AppColors.yuzey,
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(
+                      color:
+                          (seciliLigler.length < 12 ||
+                              sadeceBosOdalar ||
+                              sifrelileriGizle)
+                          ? duelRed
+                          : Colors.white12,
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.tune_rounded,
+                    color:
+                        (seciliLigler.length < 12 ||
+                            sadeceBosOdalar ||
+                            sifrelileriGizle)
+                        ? Colors.black
+                        : Colors.white60,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(24, 10, 24, 6),
+          child: Text(
+            'AKTİF ODALAR',
+            style: TextStyle(
+              color: Colors.white24,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+            ),
+          ),
+        ),
+        Expanded(
+          child: gosterilecekOdalar.isEmpty
+              ? const Center(
+                  child: Text(
+                    "Aradığınız kriterde oda bulunamadı.",
+                    style: TextStyle(color: Colors.white38),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  itemCount: gosterilecekOdalar.length,
+                  itemBuilder: (context, index) {
+                    return _odaKarti(gosterilecekOdalar[index]);
+                  },
+                ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 10, 24, 100),
+          child: GestureDetector(
+            onTap: _odaKurPaneliAc,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              decoration: BoxDecoration(
+                color: duelRed,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: const [
+                  BoxShadow(color: AppColors.kirmiziKoyu, offset: Offset(0, 5)),
+                ],
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_box_rounded, color: Colors.black, size: 24),
+                  SizedBox(width: 8),
+                  Text(
+                    "YENİ ODA KUR",
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _odaKarti(Map<String, dynamic> oda) {
+    final bool doluMu = oda['dolu'] >= oda['kapasite'];
+    return GestureDetector(
+      onTap: () {
+        AppSettings.mediumImpact();
+        if (doluMu) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text("Bu oda şu an dolu.")));
+          return;
+        }
+        if (oda['sifreli'] == true) {
+          _sifreSor(oda);
+          return;
+        }
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => OyunOdasiEkrani(odaBilgisi: oda),
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: AppColors.yuzey,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: doluMu ? Colors.white10 : duelRed.withValues(alpha: 0.4),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          oda['isim'],
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: doluMu ? Colors.white38 : Colors.white,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (oda['sifreli']) ...[
+                        const SizedBox(width: 8),
+                        const Icon(
+                          Icons.lock_rounded,
+                          color: Colors.white38,
+                          size: 14,
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: duelRed.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          "${oda['lig']} LİGİ",
+                          style: TextStyle(
+                            color: duelRed,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        "${oda['dolu']}/${oda['kapasite']} Oyuncu",
+                        style: TextStyle(
+                          color: doluMu ? Colors.white24 : Colors.white60,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              doluMu
+                  ? Icons.not_interested_rounded
+                  : Icons.arrow_forward_ios_rounded,
+              color: doluMu ? Colors.white24 : duelRed,
+              size: 18,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// --- ŞİFRELİ ODA DIALOG ---
+// ==========================================
+class _SifreDialog extends StatefulWidget {
+  final String odaAdi;
+  final String dogruSifre;
+  final Color duelRed;
+
+  const _SifreDialog({
+    required this.odaAdi,
+    required this.dogruSifre,
+    required this.duelRed,
+  });
+
+  @override
+  State<_SifreDialog> createState() => _SifreDialogState();
+}
+
+class _SifreDialogState extends State<_SifreDialog> {
+  final TextEditingController _ctrl = TextEditingController();
+  String? _hata;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _dene() {
+    AppSettings.lightImpact();
+    final girilen = _ctrl.text.trim();
+    final dogru = widget.dogruSifre.trim();
+    if (dogru.isNotEmpty && girilen == dogru) {
+      AppSettings.heavyImpact();
+      Navigator.of(context).pop(true);
+    } else {
+      AppSettings.selectionClick();
+      setState(() => _hata = 'Şifre hatalı. Tekrar dene.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppColors.yuzey,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: widget.duelRed.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.lock_rounded,
+                    color: widget.duelRed,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    widget.odaAdi,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 17,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Bu oda şifreli. Katılmak için odanın şifresini gir.',
+              style: TextStyle(color: Colors.white60, fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              decoration: BoxDecoration(
+                color: AppColors.butonArka,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _hata != null ? widget.duelRed : Colors.white12,
+                ),
+              ),
+              child: TextField(
+                controller: _ctrl,
+                obscureText: true,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                onChanged: (_) {
+                  if (_hata != null) setState(() => _hata = null);
+                },
+                onSubmitted: (_) => _dene(),
+                decoration: const InputDecoration(
+                  hintText: 'Şifre',
+                  hintStyle: TextStyle(color: Colors.white38),
+                  prefixIcon: Icon(Icons.key_rounded, color: Colors.white38),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 14,
+                  ),
+                ),
+              ),
+            ),
+            if (_hata != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _hata!,
+                style: TextStyle(
+                  color: widget.duelRed,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            const SizedBox(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () {
+                    AppSettings.lightImpact();
+                    Navigator.of(context).pop(false);
+                  },
+                  child: const Text(
+                    'İPTAL',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                ElevatedButton(
+                  onPressed: _dene,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: widget.duelRed,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'KATIL',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// --- MODAL EKRANLARI ---
+// ==========================================
+class OdaFiltreModal extends StatefulWidget {
+  final List<String> mevcutLigler;
+  final bool mevcutSadeceBos;
+  final bool mevcutSifresiz;
+  final Function(List<String>, bool, bool) onFiltreUygula;
+
+  const OdaFiltreModal({
+    super.key,
+    required this.mevcutLigler,
+    required this.mevcutSadeceBos,
+    required this.mevcutSifresiz,
+    required this.onFiltreUygula,
+  });
+
+  @override
+  State<OdaFiltreModal> createState() => _OdaFiltreModalState();
+}
+
+class _OdaFiltreModalState extends State<OdaFiltreModal> {
+  List<String> seciliLigler = [];
+  bool sadeceBosOdalar = false;
+  bool sifrelileriGizle = false;
+
+  @override
+  void initState() {
+    super.initState();
+    seciliLigler = List.from(widget.mevcutLigler);
+    sadeceBosOdalar = widget.mevcutSadeceBos;
+    sifrelileriGizle = widget.mevcutSifresiz;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      decoration: const BoxDecoration(
+        color: AppColors.arkaPlan,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(30),
+          topRight: Radius.circular(30),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 50,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            "Filtrele",
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 25),
+          const Text(
+            "LİG SEVİYESİ",
+            style: TextStyle(
+              color: Colors.white24,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(height: 12),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 4,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 2.0,
+            children:
+                [
+                  'A100',
+                  'A250',
+                  'A500',
+                  'A1K',
+                  'B100',
+                  'B250',
+                  'B500',
+                  'B1K',
+                  'C100',
+                  'C250',
+                  'C500',
+                  'C1K',
+                ].map((lig) {
+                  final bool seciliMi = seciliLigler.contains(lig);
+                  return GestureDetector(
+                    onTap: () {
+                      AppSettings.lightImpact();
+                      setState(() {
+                        if (seciliMi) {
+                          seciliLigler.remove(lig);
+                        } else {
+                          seciliLigler.add(lig);
+                        }
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      decoration: BoxDecoration(
+                        color: seciliMi
+                            ? AppColors.kirmizi
+                            : AppColors.butonArka,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: seciliMi ? AppColors.kirmizi : Colors.white12,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          lig,
+                          style: TextStyle(
+                            color: seciliMi ? Colors.black : Colors.white60,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+          ),
+          const SizedBox(height: 25),
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.yuzey,
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: SwitchListTile(
+              title: const Text(
+                "Sadece Boş Odaları Göster",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              activeThumbColor: AppColors.kirmizi,
+              activeTrackColor: AppColors.kirmizi.withValues(alpha: 0.3),
+              inactiveThumbColor: Colors.white38,
+              inactiveTrackColor: Colors.white10,
+              value: sadeceBosOdalar,
+              onChanged: (deger) => setState(() => sadeceBosOdalar = deger),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.yuzey,
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: SwitchListTile(
+              title: const Text(
+                "Şifreli Odaları Gizle",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              activeThumbColor: AppColors.kirmizi,
+              activeTrackColor: AppColors.kirmizi.withValues(alpha: 0.3),
+              inactiveThumbColor: Colors.white38,
+              inactiveTrackColor: Colors.white10,
+              value: sifrelileriGizle,
+              onChanged: (deger) => setState(() => sifrelileriGizle = deger),
+            ),
+          ),
+          const SizedBox(height: 30),
+          GestureDetector(
+            onTap: () {
+              AppSettings.heavyImpact();
+              widget.onFiltreUygula(
+                seciliLigler,
+                sadeceBosOdalar,
+                sifrelileriGizle,
+              );
+              Navigator.pop(context);
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              decoration: BoxDecoration(
+                color: AppColors.kirmizi,
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: const Center(
+                child: Text(
+                  "SONUÇLARI GÖSTER",
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+}
+
+class OdaKurModal extends StatefulWidget {
+  final Function(Map<String, dynamic>) onOdaEkle;
+  const OdaKurModal({super.key, required this.onOdaEkle});
+
+  @override
+  State<OdaKurModal> createState() => _OdaKurModalState();
+}
+
+class _OdaKurModalState extends State<OdaKurModal> {
+  final TextEditingController _isimController = TextEditingController();
+  final TextEditingController _sifreController = TextEditingController();
+  double oyuncuSayisi = 2;
+  bool sifreliMi = false;
+  String secilenLig = 'A100';
+
+  @override
+  void dispose() {
+    _isimController.dispose();
+    _sifreController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        decoration: const BoxDecoration(
+          color: AppColors.arkaPlan,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
+          ),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 50,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                "Oda Kur",
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 25),
+              const Text(
+                "ODA ADI",
+                style: TextStyle(
+                  color: Colors.white24,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.yuzey,
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: TextField(
+                  controller: _isimController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    hintText: "Örn: Pratik Odası",
+                    hintStyle: TextStyle(color: Colors.white38),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 25),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "OYUNCU SAYISI",
+                    style: TextStyle(
+                      color: Colors.white24,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                  Text(
+                    "${oyuncuSayisi.toInt()} Kişi",
+                    style: const TextStyle(
+                      color: AppColors.kirmizi,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+              Slider(
+                value: oyuncuSayisi,
+                min: 2,
+                max: 6,
+                divisions: 4,
+                activeColor: AppColors.kirmizi,
+                inactiveColor: AppColors.yuzey,
+                onChanged: (deger) => setState(() => oyuncuSayisi = deger),
+              ),
+              const SizedBox(height: 15),
+              const Text(
+                "LİG SEVİYESİ",
+                style: TextStyle(
+                  color: Colors.white24,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 4,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 2.0,
+                children:
+                    [
+                      'A100',
+                      'A250',
+                      'A500',
+                      'A1K',
+                      'B100',
+                      'B250',
+                      'B500',
+                      'B1K',
+                      'C100',
+                      'C250',
+                      'C500',
+                      'C1K',
+                    ].map((lig) {
+                      final bool seciliMi = secilenLig == lig;
+                      return GestureDetector(
+                        onTap: () {
+                          AppSettings.lightImpact();
+                          setState(() => secilenLig = lig);
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          decoration: BoxDecoration(
+                            color: seciliMi
+                                ? AppColors.kirmizi
+                                : AppColors.butonArka,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: seciliMi
+                                  ? AppColors.kirmizi
+                                  : Colors.white12,
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              lig,
+                              style: TextStyle(
+                                color: seciliMi ? Colors.black : Colors.white60,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+              ),
+              const SizedBox(height: 25),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.yuzey,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: SwitchListTile(
+                  title: const Text(
+                    "Özel (Şifreli) Oda",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  activeThumbColor: AppColors.kirmizi,
+                  activeTrackColor: AppColors.kirmizi.withValues(alpha: 0.3),
+                  inactiveThumbColor: Colors.white38,
+                  inactiveTrackColor: Colors.white10,
+                  value: sifreliMi,
+                  onChanged: (deger) => setState(() => sifreliMi = deger),
+                ),
+              ),
+              if (sifreliMi) ...[
+                const SizedBox(height: 15),
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.yuzey,
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(
+                      color: AppColors.kirmizi.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: TextField(
+                    controller: _sifreController,
+                    obscureText: true,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      hintText: "Oda Şifresi Belirle",
+                      hintStyle: TextStyle(color: Colors.white38),
+                      prefixIcon: Icon(
+                        Icons.lock_rounded,
+                        color: Colors.white38,
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 16,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 30),
+              GestureDetector(
+                onTap: () {
+                  AppSettings.heavyImpact();
+                  String odaAdi = _isimController.text.trim();
+                  if (odaAdi.isEmpty) odaAdi = "Yeni Oda";
+                  widget.onOdaEkle({
+                    'isim': odaAdi,
+                    'lig': secilenLig,
+                    'dolu': 1,
+                    'kapasite': oyuncuSayisi.toInt(),
+                    'sifreli': sifreliMi,
+                    'sifre': sifreliMi ? _sifreController.text.trim() : '',
+                  });
+                  Navigator.pop(context);
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  decoration: BoxDecoration(
+                    color: AppColors.kirmizi,
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      "OLUŞTUR",
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class PostaKutusuModal extends StatelessWidget {
+  const PostaKutusuModal({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.85,
+      decoration: const BoxDecoration(
+        color: AppColors.arkaPlan,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(30),
+          topRight: Radius.circular(30),
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 12, bottom: 20),
+            width: 50,
+            height: 5,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          const Text(
+            "POSTA KUTUSU",
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              letterSpacing: 2,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              children: [
+                _postaKarti(
+                  "GÜNCELLEME",
+                  "V1.0.5 Yayında! Yeni Duel lobisi eklendi.",
+                  "Yeni",
+                  isUpdate: true,
+                ),
+                _postaKarti(
+                  "ÖDÜL",
+                  "Liderlik Sıralaması: 2.lik ödülü olarak 500 Elmas kazandın!",
+                  "Şimdi",
+                  isReward: true,
+                ),
+                _postaKarti(
+                  "DUYURU",
+                  "Sunucularımız bu gece 02:00'de bakıma girecektir.",
+                  "1sa",
+                  isInfo: true,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _postaKarti(
+    String baslik,
+    String icerik,
+    String zaman, {
+    bool isUpdate = false,
+    bool isReward = false,
+    bool isInfo = false,
+  }) {
+    final Color vurguRengi = isUpdate
+        ? AppColors.cyan
+        : (isReward ? AppColors.sari : Colors.white38);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.yuzey,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: vurguRengi.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                baslik,
+                style: TextStyle(
+                  color: vurguRengi,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                  letterSpacing: 1,
+                ),
+              ),
+              Text(
+                zaman,
+                style: const TextStyle(color: Colors.white24, fontSize: 11),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            icerik,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+              height: 1.4,
+            ),
+          ),
+          if (isReward) ...[
+            const SizedBox(height: 15),
+            Builder(
+              builder: (ctx) => GestureDetector(
+                onTap: () {
+                  AppSettings.heavyImpact();
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                      content: Text("Ödül hesabına yüklendi! 🎁"),
+                      backgroundColor: AppColors.sari,
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: vurguRengi,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      "ÖDÜLÜ AL",
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class SohbetEkrani extends StatefulWidget {
+  final String isim;
+  final bool arkadasMi;
+  final Map<String, dynamic>? data;
+  final VoidCallback? onArkadasEkle;
+  final VoidCallback? onArkadasCikar;
+  final VoidCallback? onEngelle;
+
+  const SohbetEkrani({
+    super.key,
+    required this.isim,
+    this.arkadasMi = true,
+    this.data,
+    this.onArkadasEkle,
+    this.onArkadasCikar,
+    this.onEngelle,
+  });
+
+  @override
+  State<SohbetEkrani> createState() => _SohbetEkraniState();
+}
+
+class _SohbetEkraniState extends State<SohbetEkrani> {
+  final TextEditingController _msgCtrl = TextEditingController();
+  final ScrollController _scrollCtrl = ScrollController();
+  late bool _isArkadas;
+  // Yerel mesaj geçmişi. Backend olmadığı için sadece bu oturumda durur.
+  // Schema: {'text': String, 'mine': bool}
+  late List<Map<String, dynamic>> _mesajlar;
+
+  @override
+  void initState() {
+    super.initState();
+    _isArkadas = widget.arkadasMi;
+    _mesajlar = [
+      {'text': 'Hey, LingoDuel oynayalım mı?', 'mine': false},
+      {'text': 'Olur, 5 dakikaya geliyorum!', 'mine': true},
+    ];
+  }
+
+  @override
+  void dispose() {
+    _msgCtrl.dispose();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _gonder() {
+    final metin = _msgCtrl.text.trim();
+    if (metin.isEmpty) return;
+    AppSettings.lightImpact();
+    setState(() {
+      _mesajlar.add({'text': metin, 'mine': true});
+      _msgCtrl.clear();
+    });
+    // En alta kaydır
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.9,
+      decoration: const BoxDecoration(
+        color: AppColors.arkaPlan,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(30),
+          topRight: Radius.circular(30),
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(24, 24, 16, 16),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Colors.white10)),
+            ),
+            child: Row(
+              children: [
+                const CircleAvatar(
+                  backgroundColor: AppColors.yuzey,
+                  child: Icon(Icons.person, color: Colors.white),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    widget.isim,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  icon: const Icon(
+                    Icons.more_vert_rounded,
+                    color: Colors.white,
+                  ),
+                  color: AppColors.yuzey,
+                  onSelected: (deger) {
+                    final messenger = ScaffoldMessenger.of(context);
+                    if (deger == 'profil') {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => BaskaKullaniciProfili(
+                          isim: widget.isim,
+                          data: widget.data,
+                          isArkadas: _isArkadas,
+                          onMesajAt: () {}, // zaten sohbetteyiz
+                        ),
+                      );
+                    } else if (deger == 'ekle_cikar') {
+                      if (_isArkadas) {
+                        widget.onArkadasCikar?.call();
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              "${widget.isim} arkadaşlıktan çıkarıldı.",
+                            ),
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      } else {
+                        widget.onArkadasEkle?.call();
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text("${widget.isim} arkadaş eklendi."),
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      }
+                      setState(() => _isArkadas = !_isArkadas);
+                    } else if (deger == 'engelle') {
+                      widget.onEngelle?.call();
+                      Navigator.pop(context);
+                      messenger.showSnackBar(
+                        SnackBar(content: Text("${widget.isim} engellendi.")),
+                      );
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'profil',
+                      child: Row(
+                        children: [
+                          Icon(Icons.account_circle_outlined, size: 18),
+                          SizedBox(width: 8),
+                          Text("Profili Gör"),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'ekle_cikar',
+                      child: Row(
+                        children: [
+                          Icon(
+                            _isArkadas
+                                ? Icons.person_remove_outlined
+                                : Icons.person_add_outlined,
+                            size: 18,
+                            color: _isArkadas ? Colors.white : AppColors.sari,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isArkadas ? "Arkadaşlıktan Çıkar" : "Arkadaş Ekle",
+                            style: TextStyle(
+                              color: _isArkadas ? Colors.white : AppColors.sari,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'engelle',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.block_flipped,
+                            size: 18,
+                            color: AppColors.kirmizi,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            "Engelle",
+                            style: TextStyle(color: AppColors.kirmizi),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: Colors.white60,
+                    size: 30,
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollCtrl,
+              padding: const EdgeInsets.all(24),
+              itemCount: _mesajlar.length,
+              itemBuilder: (_, i) {
+                final m = _mesajlar[i];
+                final mine = m['mine'] == true;
+                return Align(
+                  alignment: mine
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: mine ? AppColors.sari : AppColors.yuzey,
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(20),
+                        topRight: const Radius.circular(20),
+                        bottomLeft: mine
+                            ? const Radius.circular(20)
+                            : Radius.zero,
+                        bottomRight: mine
+                            ? Radius.zero
+                            : const Radius.circular(20),
+                      ),
+                    ),
+                    child: Text(
+                      m['text'].toString(),
+                      style: TextStyle(
+                        color: mine ? Colors.black : Colors.white,
+                        fontWeight: mine ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppColors.yuzey,
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: TextField(
+                      controller: _msgCtrl,
+                      style: const TextStyle(color: Colors.white),
+                      onSubmitted: (_) => _gonder(),
+                      textInputAction: TextInputAction.send,
+                      decoration: const InputDecoration(
+                        hintText: "Mesaj yaz...",
+                        hintStyle: TextStyle(color: Colors.white38),
+                        border: InputBorder.none,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.send_rounded, color: AppColors.sari),
+                    onPressed: _gonder,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AyarlarEkrani extends StatefulWidget {
+  const AyarlarEkrani({super.key});
+
+  @override
+  State<AyarlarEkrani> createState() => _AyarlarEkraniState();
+}
+
+class _AyarlarEkraniState extends State<AyarlarEkrani> {
+  // Kalıcı ayarlardan yükle — uygulama kapatıp açıldığında değer korunur
+  bool sfxAcik = AppSettings.sfxAcik;
+  bool muzikAcik = AppSettings.muzikAcik;
+  bool titresimAcik = AppSettings.titresimAcik;
+  bool duelloDavetleriAcik = AppSettings.duelloDavetleriAcik;
+  bool mesajBildirimleriAcik = AppSettings.mesajBildirimleriAcik;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.arkaPlan,
+      appBar: AppBar(
+        backgroundColor: AppColors.arkaPlan,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white,
+          ),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text(
+          "AYARLAR",
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
+            letterSpacing: 1.5,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        children: [
+          _bolumBasligi("SES VE TİTREŞİM"),
+          _switchAyari(
+            Icons.volume_up_outlined,
+            "Ses Efektleri (SFX)",
+            sfxAcik,
+            (val) {
+              setState(() => sfxAcik = val);
+              AppSettings.setSfx(val);
+            },
+          ),
+          _switchAyari(Icons.music_note_outlined, "Oyun İçi Müzik", muzikAcik, (
+            val,
+          ) {
+            setState(() => muzikAcik = val);
+            AppSettings.setMuzik(val);
+          }),
+          _switchAyari(
+            Icons.vibration_rounded,
+            "Dokunsal Titreşim",
+            titresimAcik,
+            (val) {
+              setState(() => titresimAcik = val);
+              AppSettings.setTitresim(val);
+            },
+          ),
+          const SizedBox(height: 25),
+          _bolumBasligi("BİLDİRİMLER"),
+          _switchAyari(
+            Icons.notifications_active_outlined,
+            "Düello Davetleri",
+            duelloDavetleriAcik,
+            (val) {
+              setState(() => duelloDavetleriAcik = val);
+              AppSettings.setDuelloDavet(val);
+            },
+          ),
+          _switchAyari(
+            Icons.chat_bubble_outline_rounded,
+            "Yeni Mesajlar",
+            mesajBildirimleriAcik,
+            (val) {
+              setState(() => mesajBildirimleriAcik = val);
+              AppSettings.setMesajBildirim(val);
+            },
+          ),
+          const SizedBox(height: 40),
+          GestureDetector(
+            onTap: () {
+              AppSettings.heavyImpact();
+              Navigator.pop(context);
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              decoration: BoxDecoration(
+                color: AppColors.kirmizi.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(
+                  color: AppColors.kirmizi.withValues(alpha: 0.5),
+                ),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.logout_rounded, color: AppColors.kirmizi),
+                  SizedBox(width: 8),
+                  Text(
+                    "HESAPTAN ÇIKIŞ YAP",
+                    style: TextStyle(
+                      color: AppColors.kirmizi,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bolumBasligi(String baslik) => Padding(
+    padding: const EdgeInsets.only(bottom: 12, left: 4),
+    child: Text(
+      baslik,
+      style: const TextStyle(
+        color: Colors.white24,
+        fontSize: 11,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 1.5,
+      ),
+    ),
+  );
+
+  Widget _switchAyari(
+    IconData ikon,
+    String metin,
+    bool deger,
+    Function(bool) onChanged,
+  ) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: AppColors.yuzey,
+        borderRadius: BorderRadius.circular(15),
+      ),
+      child: SwitchListTile(
+        activeThumbColor: AppColors.sari,
+        activeTrackColor: AppColors.sari.withValues(alpha: 0.3),
+        inactiveThumbColor: Colors.white38,
+        inactiveTrackColor: Colors.white10,
+        secondary: Icon(ikon, color: deger ? AppColors.sari : Colors.white60),
+        title: Text(
+          metin,
+          style: TextStyle(
+            color: deger ? Colors.white : Colors.white60,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        value: deger,
+        onChanged: onChanged,
+      ),
+    );
+  }
+}
+
+class ArkadasEkleModal extends StatefulWidget {
+  final Map<String, Map<String, dynamic>> tumKullanicilar;
+  final List<String> arkadasListem;
+  final List<String> engellenenListem;
+  final Function(String) onEkle;
+  final Function(String) onCikar;
+  final Function(String) onEngelle;
+  final Function(String) onEngelKaldir;
+  final Function(String) onMesajAc;
+
+  const ArkadasEkleModal({
+    super.key,
+    required this.tumKullanicilar,
+    required this.arkadasListem,
+    required this.engellenenListem,
+    required this.onEkle,
+    required this.onCikar,
+    required this.onEngelle,
+    required this.onEngelKaldir,
+    required this.onMesajAc,
+  });
+
+  @override
+  State<ArkadasEkleModal> createState() => _ArkadasEkleModalState();
+}
+
+class _ArkadasEkleModalState extends State<ArkadasEkleModal> {
+  String aramaMetni = "";
+
+  @override
+  Widget build(BuildContext context) {
+    final List<String> gosterilecekKisiler = aramaMetni.isEmpty
+        ? ['Kemal_X', 'AyseV', 'Mert_Oynuyor']
+        : widget.tumKullanicilar.keys
+              .where((k) => k.toLowerCase().contains(aramaMetni.toLowerCase()))
+              .toList();
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.85,
+      decoration: const BoxDecoration(
+        color: AppColors.arkaPlan,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(30),
+          topRight: Radius.circular(30),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 20),
+              width: 50,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              "Arkadaş Ekle",
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppColors.yuzey,
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: TextField(
+                onChanged: (text) => setState(() => aramaMetni = text),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  hintText: "Kullanıcı adı ara...",
+                  hintStyle: TextStyle(color: Colors.white38),
+                  prefixIcon: Icon(Icons.search_rounded, color: Colors.white38),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 25),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              children: [
+                if (aramaMetni.isEmpty)
+                  const Text(
+                    'ÖNERİLEN KİŞİLER',
+                    style: TextStyle(
+                      color: Colors.white24,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                if (aramaMetni.isNotEmpty)
+                  const Text(
+                    'ARAMA SONUÇLARI',
+                    style: TextStyle(
+                      color: Colors.white24,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                for (String isim in gosterilecekKisiler) _kisiEkleKarti(isim),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _kisiEkleKarti(String isim) {
+    if (!widget.tumKullanicilar.containsKey(isim)) return const SizedBox();
+    final kisi = widget.tumKullanicilar[isim]!;
+    final bool arkadasMi = widget.arkadasListem.contains(isim);
+    final bool engelliMi = widget.engellenenListem.contains(isim);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.yuzey,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(
+          color: engelliMi
+              ? AppColors.kirmizi.withValues(alpha: 0.5)
+              : Colors.white10,
+        ),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: AppColors.arkaPlan,
+            child: Icon(
+              Icons.person,
+              color: engelliMi ? AppColors.kirmizi : Colors.white60,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isim,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    decoration: engelliMi
+                        ? TextDecoration.lineThrough
+                        : TextDecoration.none,
+                    color: engelliMi ? Colors.white38 : Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  engelliMi ? "Engellendi" : kisi['durum'],
+                  style: TextStyle(
+                    color: engelliMi ? AppColors.kirmizi : Colors.white38,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded, color: Colors.white38),
+            color: AppColors.yuzey,
+            onSelected: (deger) {
+              if (deger == 'profil') {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => BaskaKullaniciProfili(
+                    isim: isim,
+                    data: kisi,
+                    isArkadas: arkadasMi,
+                    onArkadasEkle: () {
+                      widget.onEkle(isim);
+                      setState(() {});
+                    },
+                    onMesajAt: () {
+                      Navigator.pop(context);
+                      widget.onMesajAc(isim);
+                    },
+                  ),
+                );
+              } else if (deger == 'mesaj') {
+                Navigator.pop(context);
+                widget.onMesajAc(isim);
+              } else if (deger == 'ekle') {
+                widget.onEkle(isim);
+                setState(() {});
+              } else if (deger == 'cikar') {
+                widget.onCikar(isim);
+                setState(() {});
+              } else if (deger == 'engelle') {
+                widget.onEngelle(isim);
+                setState(() {});
+              } else if (deger == 'engel_kaldir') {
+                widget.onEngelKaldir(isim);
+                setState(() {});
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'profil',
+                child: Row(
+                  children: [
+                    Icon(Icons.account_circle_outlined, size: 18),
+                    SizedBox(width: 8),
+                    Text("Profili Gör"),
+                  ],
+                ),
+              ),
+              if (!engelliMi)
+                const PopupMenuItem(
+                  value: 'mesaj',
+                  child: Row(
+                    children: [
+                      Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                      SizedBox(width: 8),
+                      Text("Mesaj At"),
+                    ],
+                  ),
+                ),
+              if (engelliMi)
+                const PopupMenuItem(
+                  value: 'engel_kaldir',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 18,
+                        color: Colors.greenAccent,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        "Engeli Kaldır",
+                        style: TextStyle(color: Colors.greenAccent),
+                      ),
+                    ],
+                  ),
+                )
+              else if (arkadasMi)
+                const PopupMenuItem(
+                  value: 'cikar',
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_remove_outlined, size: 18),
+                      SizedBox(width: 8),
+                      Text("Arkadaşlıktan Çıkar"),
+                    ],
+                  ),
+                )
+              else
+                const PopupMenuItem(
+                  value: 'ekle',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.person_add_outlined,
+                        size: 18,
+                        color: AppColors.sari,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        "Arkadaşlarıma Ekle",
+                        style: TextStyle(color: AppColors.sari),
+                      ),
+                    ],
+                  ),
+                ),
+              if (!engelliMi)
+                const PopupMenuItem(
+                  value: 'engelle',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.block_flipped,
+                        size: 18,
+                        color: AppColors.kirmizi,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        "Engelle",
+                        style: TextStyle(color: AppColors.kirmizi),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// --- ORTAK BİLEŞEN: DOKUNSAL KELİME KARTI ---
+// ==========================================
+class KelimeKarti extends StatefulWidget {
+  final Map<String, dynamic> data;
+  final VoidCallback onNewWord;
+  final Color temaRengi;
+  final Color golgeRengi;
+
+  const KelimeKarti({
+    super.key,
+    required this.data,
+    required this.onNewWord,
+    required this.temaRengi,
+    required this.golgeRengi,
+  });
+
+  @override
+  State<KelimeKarti> createState() => _KelimeKartiState();
+}
+
+class _KelimeKartiState extends State<KelimeKarti> {
+  bool isFlipped = false;
+  bool isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => isPressed = true),
+      onTapUp: (_) => setState(() => isPressed = false),
+      onTapCancel: () => setState(() => isPressed = false),
+      onTap: () {
+        widget.onNewWord();
+        setState(() => isFlipped = false);
+      },
+      onLongPress: () {
+        AppSettings.heavyImpact();
+        setState(() => isFlipped = !isFlipped);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 100),
+        margin: EdgeInsets.only(bottom: 16, top: isPressed ? 6 : 0),
+        padding: const EdgeInsets.all(20),
+        constraints: BoxConstraints(minHeight: isFlipped ? 160.0 : 90.0),
+        decoration: BoxDecoration(
+          color: isFlipped ? widget.temaRengi : AppColors.yuzey,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: isPressed
+              ? []
+              : [
+                  BoxShadow(
+                    color: isFlipped ? widget.golgeRengi : AppColors.kartGolge,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+        ),
+        child: isFlipped ? _buildBack() : _buildFront(),
+      ),
+    );
+  }
+
+  Widget _buildFront() => Center(
+    child: Text(
+      widget.data['en'],
+      style: const TextStyle(
+        fontSize: 26,
+        fontWeight: FontWeight.w900,
+        color: Colors.white,
+      ),
+    ),
+  );
+
+  Widget _buildBack() => Column(
+    mainAxisAlignment: MainAxisAlignment.center,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        widget.data['tr'].toUpperCase(),
+        style: const TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.w900,
+          color: Colors.black,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        "Anlamlar: ${widget.data['others']}",
+        style: TextStyle(
+          fontSize: 13,
+          color: Colors.black.withValues(alpha: 0.6),
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      const Divider(color: Colors.black12, height: 20),
+      Text(
+        widget.data['ex'],
+        style: const TextStyle(
+          fontSize: 14,
+          fontStyle: FontStyle.italic,
+          color: Colors.black87,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ],
+  );
+}
+
+// ==========================================
+// --- BAŞKA KULLANICI PROFİLİ MODALI ---
+// ==========================================
+class BaskaKullaniciProfili extends StatelessWidget {
+  final String isim;
+  final Map<String, dynamic>? data;
+  final bool isArkadas;
+  final VoidCallback? onArkadasEkle;
+  final VoidCallback? onMesajAt;
+
+  const BaskaKullaniciProfili({
+    super.key,
+    required this.isim,
+    this.data,
+    this.isArkadas = false,
+    this.onArkadasEkle,
+    this.onMesajAt,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String durum = data != null ? data!['durum'] : "Çevrimdışı";
+    final bool isDuel = data != null ? data!['isDuel'] : false;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.85,
+      decoration: const BoxDecoration(
+        color: AppColors.arkaPlan,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 12, bottom: 20),
+            width: 50,
+            height: 5,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white60),
+                onPressed: () => Navigator.pop(context),
+              ),
+              const SizedBox(width: 16),
+            ],
+          ),
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              color: AppColors.yuzey,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white12),
+            ),
+            child: const Center(
+              child: Icon(Icons.person, size: 60, color: Colors.white60),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            isim,
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            durum,
+            style: TextStyle(
+              color: isDuel ? AppColors.kirmizi : Colors.greenAccent,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 25),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: AppColors.yuzey,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Column(
+                      children: [
+                        Text(
+                          "Lig",
+                          style: TextStyle(
+                            color: Colors.white60,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          "A LİGİ",
+                          style: TextStyle(
+                            color: AppColors.sari,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: AppColors.yuzey,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Column(
+                      children: [
+                        Text(
+                          "Kazanma",
+                          style: TextStyle(
+                            color: Colors.white60,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          "%54",
+                          style: TextStyle(
+                            color: AppColors.cyan,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 30),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: isArkadas
+                        ? null
+                        : () {
+                            final messenger = ScaffoldMessenger.of(context);
+                            AppSettings.mediumImpact();
+                            Navigator.pop(context);
+                            onArkadasEkle?.call();
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text("$isim arkadaş listene eklendi."),
+                              ),
+                            );
+                          },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: isArkadas ? AppColors.yuzey : AppColors.sari,
+                        borderRadius: BorderRadius.circular(15),
+                        border: isArkadas
+                            ? Border.all(color: Colors.white12)
+                            : null,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            isArkadas
+                                ? Icons.check_circle_rounded
+                                : Icons.person_add_rounded,
+                            color: isArkadas ? Colors.white60 : Colors.black,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            isArkadas ? "ARKADAŞSINIZ" : "ARKADAŞ EKLE",
+                            style: TextStyle(
+                              color: isArkadas ? Colors.white60 : Colors.black,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      AppSettings.mediumImpact();
+                      Navigator.pop(context);
+                      if (onMesajAt != null) {
+                        onMesajAt!();
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: AppColors.yuzey,
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.chat_bubble_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            "MESAJ AT",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
