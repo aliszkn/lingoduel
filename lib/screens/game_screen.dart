@@ -381,8 +381,10 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) =>
-              ResultScreen(players: List<Map<String, dynamic>>.from(oyuncular)),
+          builder: (context) => ResultScreen(
+            players: List<Map<String, dynamic>>.from(oyuncular),
+            odaLig: widget.odaBilgisi['lig'] as String,
+          ),
         ),
       );
       return;

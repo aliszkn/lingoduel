@@ -4,10 +4,12 @@ import 'package:flutter/services.dart';
 import 'core/app_colors.dart';
 import 'screens/home_screen.dart';
 import 'services/app_settings.dart';
+import 'services/ownership_db.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppSettings.init();
+  await OwnershipDb.init();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,

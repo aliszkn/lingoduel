@@ -13,6 +13,8 @@ class AppSettings {
   static const _kTitresim = 'titresim_acik';
   static const _kDuelloDavet = 'duello_davetleri_acik';
   static const _kMesajBildirim = 'mesaj_bildirimleri_acik';
+  static const _kPlayerLP           = 'player_lp';
+  static const _kSoftStartCompleted = 'soft_start_completed';
 
   static late SharedPreferences _prefs;
 
@@ -23,6 +25,13 @@ class AppSettings {
   static bool duelloDavetleriAcik = true;
   static bool mesajBildirimleriAcik = true;
 
+  /// Oyuncunun lig puanı (LP). Hiçbir zaman 0'ın altına düşmez.
+  static int playerLP = 0;
+
+  /// Oyuncu en az bir kez 250 LP'ye ulaştıysa true.
+  /// Bu nokta geçildiğinde A-grubu soft start kalıcı olarak biter.
+  static bool softStartCompleted = false;
+
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     sfxAcik = _prefs.getBool(_kSfx) ?? true;
@@ -30,6 +39,8 @@ class AppSettings {
     titresimAcik = _prefs.getBool(_kTitresim) ?? true;
     duelloDavetleriAcik = _prefs.getBool(_kDuelloDavet) ?? true;
     mesajBildirimleriAcik = _prefs.getBool(_kMesajBildirim) ?? true;
+    playerLP          = _prefs.getInt(_kPlayerLP) ?? 0;
+    softStartCompleted = _prefs.getBool(_kSoftStartCompleted) ?? false;
   }
 
   static Future<void> setSfx(bool v) async {
@@ -55,6 +66,21 @@ class AppSettings {
   static Future<void> setMesajBildirim(bool v) async {
     mesajBildirimleriAcik = v;
     await _prefs.setBool(_kMesajBildirim, v);
+  }
+
+  static Future<void> setPlayerLP(int lp) async {
+    playerLP = lp < 0 ? 0 : lp;
+    await _prefs.setInt(_kPlayerLP, playerLP);
+    // 250 LP'ye ilk kez ulaşıldığında soft start kalıcı olarak biter.
+    if (!softStartCompleted && playerLP >= 250) {
+      softStartCompleted = true;
+      await _prefs.setBool(_kSoftStartCompleted, true);
+    }
+  }
+
+  static Future<void> resetSoftStart() async {
+    softStartCompleted = false;
+    await _prefs.setBool(_kSoftStartCompleted, false);
   }
 
   // ── Haptik wrapper'lar ─ titresimAcik kapalıysa hiçbir şey yapmaz ────────

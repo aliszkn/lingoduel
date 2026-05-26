@@ -2,7 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/app_colors.dart';
+import '../game/league_models.dart';
+import '../game/league_rules.dart';
+import '../game/word_rarity.dart';
+import '../game/ownership_engine.dart';
 import '../services/app_settings.dart';
+import '../services/ownership_db.dart';
 import '../data/word_pool.dart';
 import 'game_screen.dart';
 
@@ -32,7 +37,7 @@ class _AnaKontrolMerkeziState extends State<AnaKontrolMerkezi> {
         children: [
           IndexedStack(
             index: aktifPanel,
-            children: const [CardsPanel(), ProfilePanel(), DuelPanel()],
+            children: [CardsPanel(), ProfilePanel(), DuelPanel()],
           ),
           Positioned(
             bottom: 30,
@@ -312,6 +317,7 @@ class _CardsPanelState extends State<CardsPanel> {
                 onNewWord: () => tekKelimeDegistir(index),
                 temaRengi: AppColors.cyan,
                 golgeRengi: AppColors.cyanKoyu,
+                level: secilenSeviye,
               );
             },
           ),
@@ -379,7 +385,7 @@ class _ProfilePanelState extends State<ProfilePanel>
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const AyarlarEkrani()),
-    );
+    ).then((_) => setState(() {}));
   }
 
   void _postaPaneliAc() {
@@ -766,16 +772,65 @@ class _ProfilePanelState extends State<ProfilePanel>
             color: Colors.white,
           ),
         ),
-        const Text(
-          "B LİGİ USTASI",
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w900,
-            color: AppColors.sari,
-            letterSpacing: 2,
-          ),
+        const SizedBox(height: 6),
+        _LpBadge(lp: AppSettings.playerLP, renk: AppColors.sari),
+        const SizedBox(height: 10),
+        FutureBuilder<FameStats>(
+          future: OwnershipEngine.getFameStats(),
+          builder: (context, snap) {
+            if (!snap.hasData) return const SizedBox.shrink();
+            final stats = snap.data!;
+            if (stats.totalOwned == 0) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.yuzey,
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          stats.title,
+                          style: const TextStyle(
+                            color: AppColors.sari,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${stats.famePoints} Puan  •  ${stats.totalOwned} Kelime',
+                          style: const TextStyle(color: Colors.white38, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        if (stats.legendary > 0)
+                          _rarityDot(WordRarity.fromRank(80).color, stats.legendary),
+                        if (stats.rare > 0)
+                          _rarityDot(WordRarity.fromRank(60).color, stats.rare),
+                        if (stats.uncommon > 0)
+                          _rarityDot(WordRarity.fromRank(40).color, stats.uncommon),
+                        if (stats.common > 0)
+                          _rarityDot(WordRarity.fromRank(20).color, stats.common),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
-        const SizedBox(height: 25),
+        const SizedBox(height: 15),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Row(
@@ -814,6 +869,21 @@ class _ProfilePanelState extends State<ProfilePanel>
       ],
     );
   }
+
+  Widget _rarityDot(Color renk, int count) => Padding(
+    padding: const EdgeInsets.only(left: 6),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8, height: 8,
+          decoration: BoxDecoration(color: renk, shape: BoxShape.circle),
+        ),
+        const SizedBox(height: 2),
+        Text('$count', style: TextStyle(color: renk, fontSize: 9, fontWeight: FontWeight.bold)),
+      ],
+    ),
+  );
 
   Widget _istatistikKarti(String baslik, String deger, Color vurguRengi) {
     return Container(
@@ -1418,6 +1488,7 @@ class _DuelPanelState extends State<DuelPanel> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (modalContext) => OdaKurModal(
+        playerLP: AppSettings.playerLP,
         onOdaEkle: (yeniOda) {
           setState(() {
             aktifOdalar.insert(0, yeniOda);
@@ -1429,7 +1500,7 @@ class _DuelPanelState extends State<DuelPanel> {
               MaterialPageRoute(
                 builder: (context) => OyunOdasiEkrani(odaBilgisi: yeniOda),
               ),
-            );
+            ).then((_) => setState(() {})); // LP değişince DuelPanel yenilenir
           });
         },
       ),
@@ -1497,7 +1568,7 @@ class _DuelPanelState extends State<DuelPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 60, 24, 10),
+          padding: const EdgeInsets.fromLTRB(24, 60, 24, 4),
           child: Row(
             children: [
               Container(
@@ -1529,6 +1600,10 @@ class _DuelPanelState extends State<DuelPanel> {
               ),
             ],
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+          child: _LpBadge(lp: AppSettings.playerLP, renk: duelRed, compact: true),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
@@ -1659,9 +1734,26 @@ class _DuelPanelState extends State<DuelPanel> {
 
   Widget _odaKarti(Map<String, dynamic> oda) {
     final bool doluMu = oda['dolu'] >= oda['kapasite'];
+    final RoomDefinition? room = roomById(oda['lig'] as String);
+    final int playerLP = AppSettings.playerLP;
+    final bool girebilir = room != null && LeagueRules.canJoin(playerLP, room);
+    final bool aboveMax = girebilir &&
+        room.levelIndex > LeagueRules.maxCreatableRoom(playerLP).levelIndex;
+
     return GestureDetector(
       onTap: () {
         AppSettings.mediumImpact();
+        if (!girebilir) {
+          final grubAdi = room != null
+              ? 'Bu oda ${room.league.name} ligine ait. '
+                  '${room.league.name} ligine girmek için '
+                  '${room.league == LeagueGroup.B ? '1100' : '2100'} LP gerekiyor.'
+              : 'Bu odaya giriş yetkiniz yok.';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(grubAdi)),
+          );
+          return;
+        }
         if (doluMu) {
           ScaffoldMessenger.of(
             context,
@@ -1677,93 +1769,147 @@ class _DuelPanelState extends State<DuelPanel> {
           MaterialPageRoute(
             builder: (context) => OyunOdasiEkrani(odaBilgisi: oda),
           ),
-        );
+        ).then((_) => setState(() {})); // LP güncellenince DuelPanel yenilenir
       },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: AppColors.yuzey,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: doluMu ? Colors.white10 : duelRed.withValues(alpha: 0.4),
+      child: Opacity(
+        opacity: girebilir ? 1.0 : 0.45,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: AppColors.yuzey,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: !girebilir
+                  ? Colors.white12
+                  : doluMu
+                      ? Colors.white10
+                      : duelRed.withValues(alpha: 0.4),
+            ),
           ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          oda['isim'],
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                            color: doluMu ? Colors.white38 : Colors.white,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            oda['isim'],
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: doluMu ? Colors.white38 : Colors.white,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      if (oda['sifreli']) ...[
+                        if (oda['sifreli']) ...[
+                          const SizedBox(width: 8),
+                          const Icon(
+                            Icons.lock_rounded,
+                            color: Colors.white38,
+                            size: 14,
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: duelRed.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            "${oda['lig']} LİGİ",
+                            style: TextStyle(
+                              color: duelRed,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
                         const SizedBox(width: 8),
-                        const Icon(
-                          Icons.lock_rounded,
-                          color: Colors.white38,
-                          size: 14,
+                        // Erişim / risk-ödül badge'i
+                        if (!girebilir)
+                          _erisimBadge(
+                            Icons.lock_outline_rounded,
+                            'YETERSİZ SEVİYE',
+                            Colors.white38,
+                          )
+                        else if (aboveMax)
+                          _erisimBadge(
+                            Icons.trending_up_rounded,
+                            'AVANTAJLI',
+                            Colors.orangeAccent,
+                          ),
+                        const SizedBox(width: 8),
+                        Text(
+                          "${oda['dolu']}/${oda['kapasite']} Oyuncu",
+                          style: TextStyle(
+                            color: doluMu ? Colors.white24 : Colors.white60,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: duelRed.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          "${oda['lig']} LİGİ",
-                          style: TextStyle(
-                            color: duelRed,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        "${oda['dolu']}/${oda['kapasite']} Oyuncu",
-                        style: TextStyle(
-                          color: doluMu ? Colors.white24 : Colors.white60,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Icon(
-              doluMu
-                  ? Icons.not_interested_rounded
-                  : Icons.arrow_forward_ios_rounded,
-              color: doluMu ? Colors.white24 : duelRed,
-              size: 18,
-            ),
-          ],
+              Icon(
+                !girebilir
+                    ? Icons.block_rounded
+                    : doluMu
+                        ? Icons.not_interested_rounded
+                        : Icons.arrow_forward_ios_rounded,
+                color: !girebilir
+                    ? Colors.white24
+                    : doluMu
+                        ? Colors.white24
+                        : duelRed,
+                size: 18,
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _erisimBadge(IconData ikon, String etiket, Color renk) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: renk.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: renk.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(ikon, size: 9, color: renk),
+          const SizedBox(width: 3),
+          Text(
+            etiket,
+            style: TextStyle(
+              color: renk,
+              fontSize: 8,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2163,8 +2309,9 @@ class _OdaFiltreModalState extends State<OdaFiltreModal> {
 }
 
 class OdaKurModal extends StatefulWidget {
+  final int playerLP;
   final Function(Map<String, dynamic>) onOdaEkle;
-  const OdaKurModal({super.key, required this.onOdaEkle});
+  const OdaKurModal({super.key, required this.playerLP, required this.onOdaEkle});
 
   @override
   State<OdaKurModal> createState() => _OdaKurModalState();
@@ -2305,23 +2452,25 @@ class _OdaKurModalState extends State<OdaKurModal> {
                 crossAxisSpacing: 10,
                 childAspectRatio: 2.0,
                 children:
-                    [
-                      'A100',
-                      'A250',
-                      'A500',
-                      'A1K',
-                      'B100',
-                      'B250',
-                      'B500',
-                      'B1K',
-                      'C100',
-                      'C250',
-                      'C500',
-                      'C1K',
-                    ].map((lig) {
+                    kAllRooms.map((room) {
+                      final lig = room.id;
                       final bool seciliMi = secilenLig == lig;
+                      final bool acabilir = LeagueRules.canCreate(widget.playerLP, room);
                       return GestureDetector(
                         onTap: () {
+                          if (!acabilir) {
+                            AppSettings.selectionClick();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  '$lig için ${room.createThreshold} LP gerekiyor. '
+                                  'Şu anki LP: ${widget.playerLP}',
+                                ),
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                            return;
+                          }
                           AppSettings.lightImpact();
                           setState(() => secilenLig = lig);
                         },
@@ -2330,23 +2479,44 @@ class _OdaKurModalState extends State<OdaKurModal> {
                           decoration: BoxDecoration(
                             color: seciliMi
                                 ? AppColors.kirmizi
-                                : AppColors.butonArka,
+                                : acabilir
+                                    ? AppColors.butonArka
+                                    : AppColors.butonArka.withValues(alpha: 0.3),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: seciliMi
                                   ? AppColors.kirmizi
-                                  : Colors.white12,
+                                  : acabilir
+                                      ? Colors.white12
+                                      : Colors.white12.withValues(alpha: 0.3),
                             ),
                           ),
-                          child: Center(
-                            child: Text(
-                              lig,
-                              style: TextStyle(
-                                color: seciliMi ? Colors.black : Colors.white60,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 13,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Text(
+                                lig,
+                                style: TextStyle(
+                                  color: seciliMi
+                                      ? Colors.black
+                                      : acabilir
+                                          ? Colors.white60
+                                          : Colors.white24,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 13,
+                                ),
                               ),
-                            ),
+                              if (!acabilir)
+                                const Positioned(
+                                  top: 4,
+                                  right: 6,
+                                  child: Icon(
+                                    Icons.lock_rounded,
+                                    size: 8,
+                                    color: Colors.white24,
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       );
@@ -2909,6 +3079,22 @@ class _AyarlarEkraniState extends State<AyarlarEkrani> {
   bool duelloDavetleriAcik = AppSettings.duelloDavetleriAcik;
   bool mesajBildirimleriAcik = AppSettings.mesajBildirimleriAcik;
 
+  int get _lp => AppSettings.playerLP;
+
+  Future<void> _lpDegistir(int delta) async {
+    AppSettings.lightImpact();
+    await AppSettings.setPlayerLP(_lp + delta);
+    setState(() {});
+  }
+
+  Future<void> _lpSifirla() async {
+    AppSettings.heavyImpact();
+    await AppSettings.setPlayerLP(0);
+    await AppSettings.resetSoftStart();
+    await OwnershipDb.resetAll();
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2981,6 +3167,101 @@ class _AyarlarEkraniState extends State<AyarlarEkrani> {
               setState(() => mesajBildirimleriAcik = val);
               AppSettings.setMesajBildirim(val);
             },
+          ),
+          const SizedBox(height: 25),
+          _bolumBasligi("TEST — LP AYARI"),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.emoji_events_outlined, color: AppColors.sari, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      "Mevcut LP: $_lp",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      "${LeagueRules.groupOf(_lp).name} Grubu",
+                      style: TextStyle(
+                        color: AppColors.sari.withValues(alpha: 0.7),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final delta in [-100, -50, 50, 100, 250])
+                      GestureDetector(
+                        onTap: () => _lpDegistir(delta),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: delta < 0
+                                ? AppColors.kirmizi.withValues(alpha: 0.15)
+                                : Colors.greenAccent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: delta < 0
+                                  ? AppColors.kirmizi.withValues(alpha: 0.4)
+                                  : Colors.greenAccent.withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: Text(
+                            delta > 0 ? "+$delta" : "$delta",
+                            style: TextStyle(
+                              color: delta < 0 ? AppColors.kirmizi : Colors.greenAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: _lpSifirla,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: const Center(
+                      child: Text(
+                        "SIFIRLA",
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 40),
           GestureDetector(
@@ -3391,6 +3672,7 @@ class KelimeKarti extends StatefulWidget {
   final VoidCallback onNewWord;
   final Color temaRengi;
   final Color golgeRengi;
+  final String level; // 'A' | 'B' | 'C'
 
   const KelimeKarti({
     super.key,
@@ -3398,6 +3680,7 @@ class KelimeKarti extends StatefulWidget {
     required this.onNewWord,
     required this.temaRengi,
     required this.golgeRengi,
+    required this.level,
   });
 
   @override
@@ -3407,9 +3690,49 @@ class KelimeKarti extends StatefulWidget {
 class _KelimeKartiState extends State<KelimeKarti> {
   bool isFlipped = false;
   bool isPressed = false;
+  String? _owner; // null = henüz yüklenmedi / sahipsiz
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOwner();
+  }
+
+  Future<void> _loadOwner() async {
+    final o = await OwnershipEngine.getOwner(
+      widget.level, widget.data['rank'] as int,
+    );
+    if (mounted) setState(() => _owner = o);
+  }
+
+  Future<void> _tryClaimAndNotify() async {
+    final rank = widget.data['rank'] as int;
+    final result = await OwnershipEngine.tryClaimFlashcard(
+      level: widget.level, rank: rank,
+    );
+    if (!mounted) return;
+    if (result.claimed) {
+      setState(() => _owner = 'Sen');
+      final rarity = result.rarity;
+      final isSteal = result.isSteal;
+      final msg = isSteal
+          ? '${widget.data['en']} çalındı! (${rarity.label})'
+          : '${widget.data['en']} sahiplenildi! (${rarity.label})';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: rarity.color,
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final rank    = widget.data['rank'] as int;
+    final rarity  = WordRarity.fromRank(rank);
+    final ownedByMe = _owner == 'Sen';
+
     return GestureDetector(
       onTapDown: (_) => setState(() => isPressed = true),
       onTapUp: (_) => setState(() => isPressed = false),
@@ -3420,7 +3743,9 @@ class _KelimeKartiState extends State<KelimeKarti> {
       },
       onLongPress: () {
         AppSettings.heavyImpact();
+        final opening = !isFlipped;
         setState(() => isFlipped = !isFlipped);
+        if (opening) _tryClaimAndNotify();
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
@@ -3439,53 +3764,96 @@ class _KelimeKartiState extends State<KelimeKarti> {
                   ),
                 ],
         ),
-        child: isFlipped ? _buildBack() : _buildFront(),
+        child: isFlipped
+            ? _buildBack(ownedByMe, rarity)
+            : _buildFront(ownedByMe, rarity),
       ),
     );
   }
 
-  Widget _buildFront() => Center(
+  Widget _rarityChip(RarityLevel rarity, {bool dark = false}) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: rarity.color.withValues(alpha: dark ? 0.18 : 0.12),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(
+        color: rarity.color.withValues(alpha: dark ? 0.5 : 0.35),
+        width: 0.8,
+      ),
+    ),
     child: Text(
-      widget.data['en'],
-      style: const TextStyle(
-        fontSize: 26,
-        fontWeight: FontWeight.w900,
-        color: Colors.white,
+      rarity.label,
+      style: TextStyle(
+        fontSize: 9,
+        fontWeight: FontWeight.bold,
+        color: dark ? Colors.black87 : rarity.color,
+        letterSpacing: 0.5,
       ),
     ),
   );
 
-  Widget _buildBack() => Column(
-    mainAxisAlignment: MainAxisAlignment.center,
-    crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildFront(bool ownedByMe, RarityLevel rarity) => Stack(
     children: [
-      Text(
-        widget.data['tr'].toUpperCase(),
-        style: const TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.w900,
-          color: Colors.black,
+      Center(
+        child: Text(
+          widget.data['en'],
+          style: const TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
+          ),
         ),
       ),
-      const SizedBox(height: 4),
-      Text(
-        "Anlamlar: ${widget.data['others']}",
-        style: TextStyle(
-          fontSize: 13,
-          color: Colors.black.withValues(alpha: 0.6),
-          fontWeight: FontWeight.bold,
+      Positioned(top: 0, right: 0, child: _rarityChip(rarity)),
+      if (ownedByMe)
+        const Positioned(
+          top: 0, left: 0,
+          child: Icon(Icons.star_rounded, color: AppColors.sari, size: 18),
         ),
+    ],
+  );
+
+  Widget _buildBack(bool ownedByMe, RarityLevel rarity) => Stack(
+    children: [
+      Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.data['tr'].toUpperCase(),
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              color: Colors.black,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "Anlamlar: ${widget.data['others']}",
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.black.withValues(alpha: 0.6),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const Divider(color: Colors.black12, height: 20),
+          Text(
+            widget.data['ex'],
+            style: const TextStyle(
+              fontSize: 14,
+              fontStyle: FontStyle.italic,
+              color: Colors.black87,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
-      const Divider(color: Colors.black12, height: 20),
-      Text(
-        widget.data['ex'],
-        style: const TextStyle(
-          fontSize: 14,
-          fontStyle: FontStyle.italic,
-          color: Colors.black87,
-          fontWeight: FontWeight.w600,
+      Positioned(top: 0, right: 0, child: _rarityChip(rarity, dark: true)),
+      if (ownedByMe)
+        const Positioned(
+          top: 0, left: 0,
+          child: Icon(Icons.star_rounded, color: Colors.black54, size: 18),
         ),
-      ),
     ],
   );
 }
@@ -3735,6 +4103,128 @@ class BaskaKullaniciProfili extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ==========================================
+// --- LP ROZET WİDGET'I (ortak kullanım) ---
+// ==========================================
+class _LpBadge extends StatelessWidget {
+  final int lp;
+  final Color renk;
+  /// compact=true → sadece rozet chip'i, progress bar yok (Row içinde güvenli)
+  final bool compact;
+
+  const _LpBadge({required this.lp, required this.renk, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final group    = LeagueRules.groupOf(lp);
+    final maxRoom  = LeagueRules.maxCreatableRoom(lp);
+    final softStart = LeagueRules.isSoftStart(
+      lp, softStartCompleted: AppSettings.softStartCompleted,
+    );
+
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        color: renk.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: renk.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.bolt_rounded, color: renk, size: 13),
+          const SizedBox(width: 5),
+          Text(
+            '${group.name} LİGİ • ${maxRoom.id}',
+            style: TextStyle(
+              color: renk,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(width: 7),
+          Text(
+            '$lp LP',
+            style: TextStyle(
+              color: renk.withValues(alpha: 0.8),
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          if (softStart) ...[
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                'SOFT',
+                style: TextStyle(
+                  color: Colors.greenAccent,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    if (compact) return chip;
+
+    // Tam versiyon: chip + progress bar
+    final nextRooms = kAllRooms.where((r) => r.createThreshold > lp).toList();
+    final int? nextThreshold =
+        nextRooms.isNotEmpty ? nextRooms.first.createThreshold : null;
+    final int currentThreshold = maxRoom.createThreshold;
+    final double progress = nextThreshold != null && nextThreshold > currentThreshold
+        ? (lp - currentThreshold) / (nextThreshold - currentThreshold)
+        : 1.0;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        chip,
+        if (nextThreshold != null) ...[
+          const SizedBox(height: 6),
+          SizedBox(
+            width: 200,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: progress.clamp(0.0, 1.0),
+                    backgroundColor: renk.withValues(alpha: 0.1),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      renk.withValues(alpha: 0.6),
+                    ),
+                    minHeight: 4,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '$lp / $nextThreshold LP',
+                  style: TextStyle(
+                    color: renk.withValues(alpha: 0.5),
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
