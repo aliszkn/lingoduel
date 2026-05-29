@@ -1,0 +1,30 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="glow_mistik" cx="50%" cy="48%" r="50%"><stop offset="0%" stop-color="#FF3D63" stop-opacity="0.5"></stop><stop offset="45%" stop-color="#E879F9" stop-opacity="0.25"></stop><stop offset="100%" stop-color="#FF3D63" stop-opacity="0"></stop></radialGradient></defs>
+  <circle cx="32" cy="32" r="30" fill="url(#glow_mistik)"></circle>
+  <polygon points="45.5,32 44.47,37.17 41.55,41.55 37.17,44.47 32,45.5 26.83,44.47 22.45,41.55 19.53,37.17 18.5,32 19.53,26.83 22.45,22.45 26.83,19.53 32,18.5 37.17,19.53 41.55,22.45 44.47,26.83" fill="#FFD6DE"></polygon>
+  <polygon points="54.5,32 52.79,40.61 44.47,37.17 45.5,32" fill="#7C0E2C"></polygon>
+  <polygon points="52.79,40.61 47.91,47.91 41.55,41.55 44.47,37.17" fill="#7C0E2C"></polygon>
+  <polygon points="47.91,47.91 40.61,52.79 37.17,44.47 41.55,41.55" fill="#7C0E2C"></polygon>
+  <polygon points="40.61,52.79 32,54.5 32,45.5 37.17,44.47" fill="#7C0E2C"></polygon>
+  <polygon points="32,54.5 23.39,52.79 26.83,44.47 32,45.5" fill="#7C0E2C"></polygon>
+  <polygon points="23.39,52.79 16.09,47.91 22.45,41.55 26.83,44.47" fill="#D11A45"></polygon>
+  <polygon points="16.09,47.91 11.21,40.61 19.53,37.17 22.45,41.55" fill="#D11A45"></polygon>
+  <polygon points="11.21,40.61 9.5,32 18.5,32 19.53,37.17" fill="#FB4768"></polygon>
+  <polygon points="9.5,32 11.21,23.39 19.53,26.83 18.5,32" fill="#FF7088"></polygon>
+  <polygon points="11.21,23.39 16.09,16.09 22.45,22.45 19.53,26.83" fill="#FF7088"></polygon>
+  <polygon points="16.09,16.09 23.39,11.21 26.83,19.53 22.45,22.45" fill="#FF7088"></polygon>
+  <polygon points="23.39,11.21 32,9.5 32,18.5 26.83,19.53" fill="#FF7088"></polygon>
+  <polygon points="32,9.5 40.61,11.21 37.17,19.53 32,18.5" fill="#FF7088"></polygon>
+  <polygon points="40.61,11.21 47.91,16.09 41.55,22.45 37.17,19.53" fill="#FF7088"></polygon>
+  <polygon points="47.91,16.09 52.79,23.39 44.47,26.83 41.55,22.45" fill="#FB4768"></polygon>
+  <polygon points="52.79,23.39 54.5,32 45.5,32 44.47,26.83" fill="#D11A45"></polygon>
+  <path d="M54.5,32 L52.79,40.61 L47.91,47.91 L40.61,52.79 L32,54.5 L23.39,52.79 L16.09,47.91 L11.21,40.61 L9.5,32 L11.21,23.39 L16.09,16.09 L23.39,11.21 L32,9.5 L40.61,11.21 L47.91,16.09 L52.79,23.39 Z" fill="none" stroke="#7C0E2C" stroke-width="1" stroke-linejoin="round" opacity=".7"></path>
+  <path d="M54.5,32 L52.79,40.61 L47.91,47.91 L40.61,52.79 L32,54.5 L23.39,52.79 L16.09,47.91 L11.21,40.61 L9.5,32 L11.21,23.39 L16.09,16.09 L23.39,11.21 L32,9.5 L40.61,11.21 L47.91,16.09 L52.79,23.39 Z" fill="none" stroke="#FFD6DE" stroke-width=".6" stroke-linejoin="round" opacity=".35"></path>
+  <polygon points="26.83,19.53 32,18.5 37.17,19.53" fill="#FFD6DE" opacity="0.4"></polygon>
+  <circle cx="32" cy="32" r="29" fill="none" stroke="#FF3D63" stroke-width="1" opacity=".28"></circle>
+  <circle cx="13" cy="16" r="1.7" fill="#FFD6DE" opacity=".85"></circle>
+  <circle cx="52" cy="21" r="2.1" fill="#E879F9" opacity=".8"></circle>
+  <circle cx="50" cy="47" r="1.5" fill="#FFD6DE" opacity=".7"></circle>
+  <circle cx="14" cy="45" r="1.3" fill="#E879F9" opacity=".7"></circle>
+  <path d="M25,20.6 C25.884,23.116 25.884,23.116 28.4,24 C25.884,24.884 25.884,24.884 25,27.4 C24.116,24.884 24.116,24.884 21.6,24 C24.116,23.116 24.116,23.116 25,20.6 Z" fill="#fff" opacity="0.9"></path>
+</svg>

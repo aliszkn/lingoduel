@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -126,6 +127,22 @@ class AppSettings {
     softStartCompleted = false;
     await _prefs.setBool(_kSoftStartCompleted, false);
   }
+
+  // ── Ses wrapper'lar ─ sfxAcik kapalıysa hiçbir şey yapmaz ───────────────
+  static final _player = AudioPlayer();
+
+  static Future<void> _ses(String dosya) async {
+    if (!sfxAcik) return;
+    try {
+      await _player.stop();
+      await _player.play(AssetSource('sesler/$dosya'));
+    } catch (_) {}
+  }
+
+  static Future<void> sesDogru()       => _ses('dogru.mp3');
+  static Future<void> sesYanlis()      => _ses('yanlis.mp3');
+  static Future<void> sesMacKazanma() => _ses('mac_kazanma.mp3');
+  static Future<void> sesMacKaybetme() => _ses('mac_kaybetme.mp3');
 
   // ── Haptik wrapper'lar ─ titresimAcik kapalıysa hiçbir şey yapmaz ────────
   static void lightImpact() {

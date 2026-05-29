@@ -1,0 +1,11 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="glow_siradisi" cx="50%" cy="48%" r="50%"><stop offset="0%" stop-color="#34D058" stop-opacity="0.26"></stop><stop offset="100%" stop-color="#34D058" stop-opacity="0"></stop></radialGradient></defs>
+  <circle cx="32" cy="32" r="23" fill="url(#glow_siradisi)"></circle>
+  <polygon points="32,19.5 42.83,38.25 21.17,38.25" fill="#BBF7D0"></polygon>
+  <polygon points="32,7 53.65,44.5 42.83,38.25 32,19.5" fill="#22C55E"></polygon>
+  <polygon points="53.65,44.5 10.35,44.5 21.17,38.25 42.83,38.25" fill="#0B5A2C"></polygon>
+  <polygon points="10.35,44.5 32,7 32,19.5 21.17,38.25" fill="#4ADE80"></polygon>
+  <path d="M32,7 L53.65,44.5 L10.35,44.5 Z" fill="none" stroke="#0B5A2C" stroke-width="1" stroke-linejoin="round" opacity=".7"></path>
+  <path d="M32,7 L53.65,44.5 L10.35,44.5 Z" fill="none" stroke="#BBF7D0" stroke-width=".6" stroke-linejoin="round" opacity=".35"></path>
+  <polygon points="21.17,38.25 32,19.5 42.83,38.25" fill="#BBF7D0" opacity="0.4"></polygon>
+</svg>

@@ -13,6 +13,8 @@ import '../services/app_settings.dart';
 import '../services/database_helper.dart';
 import '../services/ownership_db.dart';
 import 'game_screen.dart';
+import 'search_screen.dart';
+import '../widgets/word_card.dart';
 
 // ==========================================
 // --- PANELLER ARASI GEÇİŞ (ANA YAPI) ---
@@ -248,9 +250,39 @@ class _CardsPanelState extends State<CardsPanel> {
                   letterSpacing: -1,
                 ),
               ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () {
+                  AppSettings.selectionClick();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const KelimeAramaEkrani(),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.yuzey,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.search_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
+        if (_setYukleniyor)
+          const LinearProgressIndicator(
+            color: AppColors.cyan,
+            backgroundColor: Colors.transparent,
+            minHeight: 2,
+          ),
         const Padding(
           padding: EdgeInsets.fromLTRB(24, 15, 24, 6),
           child: Text(
@@ -451,6 +483,9 @@ class _ProfilePanelState extends State<ProfilePanel>
   bool _gecmisYukleniyor = true;
   final Set<int> _acikMaclar = {}; // açık maç kartı id'leri
 
+  // FameStats future — build'de yeniden oluşturulmaması için instance variable.
+  late Future<FameStats> _fameFuture;
+
   Map<String, Map<String, dynamic>> tumKullanicilar = {
     'Ahmet_Can': {'durum': 'Çevrimiçi', 'aktif': true, 'isDuel': false},
     'Zeynep01': {'durum': 'Düelloda', 'aktif': false, 'isDuel': true},
@@ -481,6 +516,7 @@ class _ProfilePanelState extends State<ProfilePanel>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _fameFuture = OwnershipEngine.getFameStats();
     AppSettings.matchSavedNotifier.addListener(_reloadGecmis);
     _reloadGecmis(); // ilk yükleme
   }
@@ -498,6 +534,7 @@ class _ProfilePanelState extends State<ProfilePanel>
       setState(() {
         _macGecmisi = records;
         _gecmisYukleniyor = false;
+        _fameFuture = OwnershipEngine.getFameStats(); // stats da yenile
       });
     });
   }
@@ -1020,15 +1057,18 @@ class _ProfilePanelState extends State<ProfilePanel>
         : '%${AppSettings.kazanmaOraniYuzde!.round()}';
 
     return FutureBuilder<FameStats>(
-      future: OwnershipEngine.getFameStats(),
+      future: _fameFuture,
       builder: (context, snap) {
         final kelimeStr =
             snap.hasData ? _formatlaSayi(snap.data!.totalOwned) : '—';
         return Row(
           children: [
             Expanded(
-              child: _minikStatChip('$kelimeStr Kelime', AppColors.cyan,
-                  Icons.workspace_premium_rounded),
+              child: GestureDetector(
+                onTap: _sahipKelimelerGoster,
+                child: _minikStatChip('$kelimeStr Kelime', AppColors.cyan,
+                    Icons.workspace_premium_rounded),
+              ),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -1043,6 +1083,16 @@ class _ProfilePanelState extends State<ProfilePanel>
           ],
         );
       },
+    );
+  }
+
+  void _sahipKelimelerGoster() {
+    AppSettings.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => _SahipKelimelerSheet(),
     );
   }
 
@@ -1088,6 +1138,14 @@ class _ProfilePanelState extends State<ProfilePanel>
   }
 
   Widget _buildArkadaslarSekmesi() {
+    if (arkadasListem.isEmpty) {
+      return const Center(
+        child: Text(
+          'Henüz arkadaşın yok.',
+          style: TextStyle(color: Colors.white38, fontSize: 14),
+        ),
+      );
+    }
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 100),
       children: [
@@ -1696,21 +1754,302 @@ class _ProfilePanelState extends State<ProfilePanel>
 
   Widget _kelimePili(MatchWordResult w) {
     final Color c = w.correct == null
-        ? Colors.white24               // cevapsız
+        ? Colors.white24
         : w.correct! ? Colors.greenAccent : AppColors.kirmizi;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: c.withValues(alpha: 0.4)),
+    return GestureDetector(
+      onTap: () => _kelimeDetayGoster(w),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: c.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: c.withValues(alpha: 0.4)),
+        ),
+        child: Text(
+          w.en,
+          style: TextStyle(
+            color: c,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
-      child: Text(
-        w.en,
-        style: TextStyle(
-          color: c,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
+    );
+  }
+
+  void _kelimeDetayGoster(MatchWordResult w) {
+    AppSettings.selectionClick();
+    final Color c = w.correct == null
+        ? Colors.white54
+        : w.correct! ? Colors.greenAccent : AppColors.kirmizi;
+    final String durum = w.correct == null
+        ? 'Cevaplanmadı'
+        : w.correct! ? 'Doğru' : 'Yanlış';
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 36),
+        decoration: const BoxDecoration(
+          color: AppColors.koyuYuzey,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                RarityIcon(w.rarity, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    w.en,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: c.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: c.withValues(alpha: 0.4)),
+                  ),
+                  child: Text(
+                    durum,
+                    style: TextStyle(
+                        color: c,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              w.tr,
+              style: const TextStyle(
+                color: AppColors.sari,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (w.desc.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                w.desc,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+              ),
+            ],
+            if (w.cevapSaniyesi != null) ...[
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  const Icon(Icons.timer_outlined,
+                      color: Colors.white38, size: 16),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${w.cevapSaniyesi}. saniyede cevaplandı',
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 13),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Sahip olunan kelimeler bottom sheet ──────────────────────────────────────
+
+class _SahipKelimelerSheet extends StatefulWidget {
+  const _SahipKelimelerSheet();
+
+  @override
+  State<_SahipKelimelerSheet> createState() => _SahipKelimelerSheetState();
+}
+
+class _SahipKelimelerSheetState extends State<_SahipKelimelerSheet> {
+  bool _yukleniyor = true;
+  // Enderlik → kelime listesi (en nadir önce)
+  Map<WordRarity, List<WordEntry>> _grouped = {};
+  int _toplam = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _yukle();
+  }
+
+  Future<void> _yukle() async {
+    final records = await OwnershipDb.getOwnedWords('Sen');
+    if (!mounted) return;
+    if (records.isEmpty) {
+      setState(() => _yukleniyor = false);
+      return;
+    }
+    final wordMap = await DatabaseHelper.getWordsByWordIds(
+      records.map((r) => r.wordId).toList(),
+    );
+    final grouped = <WordRarity, List<WordEntry>>{};
+    for (final r in WordRarity.values.reversed) {
+      final list = records
+          .where((rec) => rec.rarity == r)
+          .map((rec) => wordMap[rec.wordId])
+          .whereType<WordEntry>()
+          .toList();
+      if (list.isNotEmpty) grouped[r] = list;
+    }
+    if (!mounted) return;
+    setState(() {
+      _grouped = grouped;
+      _toplam = records.length;
+      _yukleniyor = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      maxChildSize: 0.92,
+      minChildSize: 0.35,
+      builder: (_, ctrl) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.koyuYuzey,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.workspace_premium_rounded,
+                      color: AppColors.sari, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$_toplam KELİME SAHİPLENDİN',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(color: Colors.white10, height: 1),
+            Expanded(
+              child: _yukleniyor
+                  ? const Center(
+                      child: CircularProgressIndicator(color: AppColors.sari))
+                  : _toplam == 0
+                      ? const Center(
+                          child: Text('Henüz kelime sahiplenmedin.',
+                              style: TextStyle(
+                                  color: Colors.white38, fontSize: 14)))
+                      : ListView(
+                          controller: ctrl,
+                          padding:
+                              const EdgeInsets.fromLTRB(20, 14, 20, 32),
+                          children: [
+                            for (final entry in _grouped.entries) ...[
+                              Padding(
+                                padding:
+                                    const EdgeInsets.only(top: 8, bottom: 8),
+                                child: Row(
+                                  children: [
+                                    RarityIcon(entry.key, size: 18),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      entry.key.labelTr.toUpperCase(),
+                                      style: TextStyle(
+                                        color: entry.key.color,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1.2,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '(${entry.value.length})',
+                                      style: TextStyle(
+                                        color: entry.key.color
+                                            .withValues(alpha: 0.6),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: entry.value
+                                    .map((w) => Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 12, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: w.rarity.color
+                                                .withValues(alpha: 0.12),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                                color: w.rarity.color
+                                                    .withValues(alpha: 0.4)),
+                                          ),
+                                          child: Text(
+                                            w.en,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ))
+                                    .toList(),
+                              ),
+                              const SizedBox(height: 6),
+                            ],
+                          ],
+                        ),
+            ),
+          ],
         ),
       ),
     );
@@ -4115,145 +4454,7 @@ class _ArkadasEkleModalState extends State<ArkadasEkleModal> {
 // ==========================================
 // --- ORTAK BİLEŞEN: DOKUNSAL KELİME KARTI ---
 // ==========================================
-class KelimeKarti extends StatefulWidget {
-  final Map<String, dynamic> data;
-  final VoidCallback onNewWord;
-  final Color temaRengi;
-  final Color golgeRengi;
-  final String setId; // 'A' | 'BI' | 'BII' | 'BIII' | 'CI' | 'CII' | 'CIII'
-
-  const KelimeKarti({
-    super.key,
-    required this.data,
-    required this.onNewWord,
-    required this.temaRengi,
-    required this.golgeRengi,
-    required this.setId,
-  });
-
-  @override
-  State<KelimeKarti> createState() => _KelimeKartiState();
-}
-
-class _KelimeKartiState extends State<KelimeKarti> {
-  bool isFlipped = false;
-  bool isPressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final rank   = widget.data['rank'] as int;
-    final rarity = WordRarityMath.rarityForIndex(setId: widget.setId, index: rank);
-
-    return GestureDetector(
-      onTapDown: (_) => setState(() => isPressed = true),
-      onTapUp: (_) => setState(() => isPressed = false),
-      onTapCancel: () => setState(() => isPressed = false),
-      onTap: () {
-        widget.onNewWord();
-        setState(() => isFlipped = false);
-      },
-      onLongPress: () {
-        AppSettings.heavyImpact();
-        setState(() => isFlipped = !isFlipped);
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 100),
-        margin: EdgeInsets.only(bottom: 16, top: isPressed ? 6 : 0),
-        padding: const EdgeInsets.all(20),
-        constraints: BoxConstraints(minHeight: isFlipped ? 160.0 : 90.0),
-        decoration: BoxDecoration(
-          color: isFlipped ? widget.temaRengi : AppColors.yuzey,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: isPressed
-              ? []
-              : [
-                  BoxShadow(
-                    color: isFlipped ? widget.golgeRengi : AppColors.kartGolge,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-        ),
-        child: isFlipped ? _buildBack(rarity) : _buildFront(rarity),
-      ),
-    );
-  }
-
-  Widget _rarityChip(WordRarity rarity, {bool dark = false}) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(
-      color: rarity.color.withValues(alpha: dark ? 0.18 : 0.12),
-      borderRadius: BorderRadius.circular(6),
-      border: Border.all(
-        color: rarity.color.withValues(alpha: dark ? 0.5 : 0.35),
-        width: 0.8,
-      ),
-    ),
-    child: Text(
-      rarity.label,
-      style: TextStyle(
-        fontSize: 9,
-        fontWeight: FontWeight.bold,
-        color: dark ? Colors.black87 : rarity.color,
-        letterSpacing: 0.5,
-      ),
-    ),
-  );
-
-  Widget _buildFront(WordRarity rarity) => Stack(
-    children: [
-      Center(
-        child: Text(
-          widget.data['en'],
-          style: const TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.w900,
-            color: Colors.white,
-          ),
-        ),
-      ),
-      Positioned(top: 0, right: 0, child: _rarityChip(rarity)),
-    ],
-  );
-
-  Widget _buildBack(WordRarity rarity) => Stack(
-    children: [
-      Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.data['tr'].toUpperCase(),
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              color: Colors.black,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "Anlamlar: ${widget.data['others']}",
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.black.withValues(alpha: 0.6),
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const Divider(color: Colors.black12, height: 20),
-          Text(
-            widget.data['ex'],
-            style: const TextStyle(
-              fontSize: 14,
-              fontStyle: FontStyle.italic,
-              color: Colors.black87,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-      Positioned(top: 0, right: 0, child: _rarityChip(rarity, dark: true)),
-    ],
-  );
-}
+// KelimeKarti → lib/widgets/word_card.dart'a taşındı
 
 // ==========================================
 // --- BAŞKA KULLANICI PROFİLİ MODALI ---

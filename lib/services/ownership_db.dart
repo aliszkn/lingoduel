@@ -66,18 +66,24 @@ class FameStats {
 
 /// Maç geçmişindeki tek bir kelimenin sonucu.
 class MatchWordResult {
-  final String wordId;   // "A-0001"
+  final String wordId;         // "A-0001"
   final String en;
   final String tr;
+  final String desc;           // İngilizce soru metni
+  final String descTr;         // Türkçe soru metni
   final WordRarity rarity;
-  final bool? correct;   // true=doğru, false=yanlış, null=cevapsız
+  final bool? correct;         // true=doğru, false=yanlış, null=cevapsız
+  final int? cevapSaniyesi;    // Tıklama anındaki kalanSure; null = cevapsız
 
   const MatchWordResult({
     required this.wordId,
     required this.en,
     required this.tr,
+    required this.desc,
+    required this.descTr,
     required this.rarity,
     required this.correct,
+    required this.cevapSaniyesi,
   });
 }
 
@@ -272,8 +278,11 @@ class OwnershipDb {
       'id':      w.wordId,
       'en':      w.en,
       'tr':      w.tr,
+      'desc':    w.desc,
+      'desc_tr': w.descTr,
       'rarity':  w.rarity.name,
-      'correct': w.correct, // null JSON'da null olarak saklanır
+      'correct': w.correct,
+      'sn':      w.cevapSaniyesi,
     }).toList());
     await _d.insert('match_history', {
       'played_at':    DateTime.now().millisecondsSinceEpoch,
@@ -295,11 +304,14 @@ class OwnershipDb {
     return rows.map((r) {
       final raw = jsonDecode(r['words_json'] as String) as List;
       final words = raw.map((w) => MatchWordResult(
-        wordId:  w['id']     as String,
-        en:      w['en']     as String,
-        tr:      w['tr']     as String,
-        rarity:  WordRarityMath.fromDb(w['rarity'] as String),
-        correct: w['correct'] as bool?,
+        wordId:        w['id']      as String,
+        en:            w['en']      as String,
+        tr:            w['tr']      as String,
+        desc:          (w['desc']    as String?) ?? '',
+        descTr:        (w['desc_tr'] as String?) ?? '',
+        rarity:        WordRarityMath.fromDb(w['rarity'] as String),
+        correct:       w['correct']  as bool?,
+        cevapSaniyesi: w['sn']       as int?,
       )).toList();
       return MatchRecord(
         id:          r['id']           as int,

@@ -1,0 +1,14 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <polygon points="43.09,36.59 36.59,43.09 27.41,43.09 20.91,36.59 20.91,27.41 27.41,20.91 36.59,20.91 43.09,27.41" fill="#D7DBE2"></polygon>
+  <polygon points="54.17,41.18 41.18,54.17 36.59,43.09 43.09,36.59" fill="#363A41"></polygon>
+  <polygon points="41.18,54.17 22.82,54.17 27.41,43.09 36.59,43.09" fill="#363A41"></polygon>
+  <polygon points="22.82,54.17 9.83,41.18 20.91,36.59 27.41,43.09" fill="#4B515A"></polygon>
+  <polygon points="9.83,41.18 9.83,22.82 20.91,27.41 20.91,36.59" fill="#6C727D"></polygon>
+  <polygon points="9.83,22.82 22.82,9.83 27.41,20.91 20.91,27.41" fill="#9BA2AD"></polygon>
+  <polygon points="22.82,9.83 41.18,9.83 36.59,20.91 27.41,20.91" fill="#9BA2AD"></polygon>
+  <polygon points="41.18,9.83 54.17,22.82 43.09,27.41 36.59,20.91" fill="#6C727D"></polygon>
+  <polygon points="54.17,22.82 54.17,41.18 43.09,36.59 43.09,27.41" fill="#4B515A"></polygon>
+  <path d="M54.17,41.18 L41.18,54.17 L22.82,54.17 L9.83,41.18 L9.83,22.82 L22.82,9.83 L41.18,9.83 L54.17,22.82 Z" fill="none" stroke="#363A41" stroke-width="1" stroke-linejoin="round" opacity=".7"></path>
+  <path d="M54.17,41.18 L41.18,54.17 L22.82,54.17 L9.83,41.18 L9.83,22.82 L22.82,9.83 L41.18,9.83 L54.17,22.82 Z" fill="none" stroke="#D7DBE2" stroke-width=".6" stroke-linejoin="round" opacity=".35"></path>
+  <polygon points="20.91,27.41 27.41,20.91 36.59,20.91" fill="#D7DBE2" opacity="0.4"></polygon>
+</svg>

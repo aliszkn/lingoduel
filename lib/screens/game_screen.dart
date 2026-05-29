@@ -47,6 +47,9 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
   /// wordId → true (doğru) / false (yanlış). Yoksa null (cevapsız).
   final Map<String, bool> _cevapDurumu = {};
 
+  /// wordId → tıklama anındaki kalanSure. Yoksa null (cevapsız).
+  final Map<String, int> _cevapSaniyesiMap = {};
+
   /// Kullanıcının son soruda seçtiği şık — reveal görselleri için.
   /// null = henüz seçmedi (veya süre doldu).
   String? _secilenCevap;
@@ -530,6 +533,20 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
   }
 
   void _yeniSoruHazirla() {
+    // Havuz çok küçükse (< 5) yanlış şık üretilemez → güvenli çıkış.
+    if (_havuz.length < 5) {
+      _zamanlayici?.cancel();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Bu tier/set kombinasyonunda yeterli kelime yok (en az 5 gerekli).'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      Navigator.pop(context);
+      return;
+    }
     if (kacinciSoru >= toplamSoru) {
       _zamanlayici?.cancel();
       oyuncular.sort((a, b) => (b['puan'] as int).compareTo(a['puan'] as int));
@@ -548,11 +565,14 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
         position:    benimSira,
         playerCount: oyuncular.length,
         words:       _macdaGorunenKelimeler.map((w) => MatchWordResult(
-          wordId:  w.wordId,
-          en:      w.en,
-          tr:      w.tr,
-          rarity:  w.rarity,
-          correct: _cevapDurumu[w.wordId], // null = cevapsız
+          wordId:        w.wordId,
+          en:            w.en,
+          tr:            w.tr,
+          desc:          w.desc,
+          descTr:        w.descTr,
+          rarity:        w.rarity,
+          correct:       _cevapDurumu[w.wordId],
+          cevapSaniyesi: _cevapSaniyesiMap[w.wordId],
         )).toList(),
       );
       AppSettings.matchSavedNotifier.value++; // ProfilePanel'i uyar
@@ -682,15 +702,19 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
     final String? secilen = _secilenCevap;
     final String dogru = aktifSoru!.answer;
 
-    // Cevap durumunu geçmiş kaydı için sakla (tıklandıysa).
+    // Cevap durumu + cevap saniyesini geçmiş kaydı için sakla (tıklandıysa).
     if (_aktifKelime != null && secilen != null) {
       _cevapDurumu[_aktifKelime!.wordId] = secilen == dogru;
+      if (_cevapKalanSure != null) {
+        _cevapSaniyesiMap[_aktifKelime!.wordId] = _cevapKalanSure!;
+      }
     }
 
     // Sen'in seçimi `_cevapKontrol`'de, botlarınki tick'lerde yazıldı.
     // Burada sadece puan/claim/snackbar mantığı.
 
     if (secilen != null && secilen == dogru) {
+      AppSettings.sesDogru();
       // Hız bonusu: cap'li (sn > 5 → sn; sn ≤ 5 → 3 sabit).
       final int sn = _cevapKalanSure ?? 0;
       final int kazanilanPuan = _puanHesapla(sn);
@@ -723,6 +747,7 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
         ),
       );
     } else if (secilen != null) {
+      AppSettings.sesYanlis();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(

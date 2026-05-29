@@ -141,6 +141,41 @@ class DatabaseHelper {
     return rows.map(WordEntry.fromRow).toList();
   }
 
+  /// `wordId` listesine karşılık gelen kelimeleri döner (wordId → WordEntry).
+  /// wordId formatı: "setId-NNNN" (örn. "A-0042", "BII-0137").
+  /// Bulunamayan ya da boş olan kelimeler sonuca dahil edilmez.
+  static Future<Map<String, WordEntry>> getWordsByWordIds(
+      List<String> wordIds) async {
+    final result = <String, WordEntry>{};
+    if (wordIds.isEmpty) return result;
+
+    // setId → rank listesi olarak grupla
+    final bySet = <String, List<int>>{};
+    for (final wid in wordIds) {
+      final dash = wid.lastIndexOf('-');
+      if (dash <= 0) continue;
+      final setId = wid.substring(0, dash);
+      final rank = int.tryParse(wid.substring(dash + 1));
+      if (rank != null) bySet.putIfAbsent(setId, () => []).add(rank);
+    }
+
+    final db = await database;
+    for (final entry in bySet.entries) {
+      final placeholders = entry.value.map((_) => '?').join(',');
+      final rows = await db.query(
+        'words',
+        where:
+            "set_id = ? AND en != '' AND tr != '' AND rank IN ($placeholders)",
+        whereArgs: [entry.key, ...entry.value],
+      );
+      for (final row in rows) {
+        final we = WordEntry.fromRow(row);
+        result[we.wordId] = we;
+      }
+    }
+    return result;
+  }
+
   /// Setteki dolu kelime sayısı (UI rozeti). Boş placeholder'ları saymaz.
   static Future<int> countBySetId(String setId) async {
     final db = await database;
@@ -149,6 +184,22 @@ class DatabaseHelper {
       [setId],
     );
     return (rows.first['c'] as int?) ?? 0;
+  }
+
+  /// Tüm setlerde `en` veya `tr` alanında arama (büyük/küçük harf duyarsız).
+  /// Sonuçlar rank'e göre artan sırada döner (yaygın kelimeler önce).
+  static Future<List<WordEntry>> searchWords(String query,
+      {int limit = 60}) async {
+    if (query.trim().isEmpty) return const [];
+    final db = await database;
+    final rows = await db.query(
+      'words',
+      where: "(en LIKE ? OR tr LIKE ?) AND en != '' AND tr != ''",
+      whereArgs: ['%$query%', '%$query%'],
+      orderBy: 'rank ASC',
+      limit: limit,
+    );
+    return rows.map(WordEntry.fromRow).toList();
   }
 
   /// Eski API geçişi için: bir seviyenin (A/B/C) TÜM dolu kelimelerini birleştirir.

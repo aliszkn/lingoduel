@@ -1,0 +1,12 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="glow_ender" cx="50%" cy="48%" r="50%"><stop offset="0%" stop-color="#3B82F6" stop-opacity="0.3"></stop><stop offset="100%" stop-color="#3B82F6" stop-opacity="0"></stop></radialGradient></defs>
+  <circle cx="32" cy="32" r="25" fill="url(#glow_ender)"></circle>
+  <polygon points="41.02,41.02 22.98,41.02 22.98,22.98 41.02,22.98" fill="#CFE0FF"></polygon>
+  <polygon points="50.03,50.03 13.97,50.03 22.98,41.02 41.02,41.02" fill="#15287A"></polygon>
+  <polygon points="13.97,50.03 13.97,13.97 22.98,22.98 22.98,41.02" fill="#3B82F6"></polygon>
+  <polygon points="13.97,13.97 50.03,13.97 41.02,22.98 22.98,22.98" fill="#5B9BFF"></polygon>
+  <polygon points="50.03,13.97 50.03,50.03 41.02,41.02 41.02,22.98" fill="#1D4ED8"></polygon>
+  <path d="M50.03,50.03 L13.97,50.03 L13.97,13.97 L50.03,13.97 Z" fill="none" stroke="#15287A" stroke-width="1" stroke-linejoin="round" opacity=".7"></path>
+  <path d="M50.03,50.03 L13.97,50.03 L13.97,13.97 L50.03,13.97 Z" fill="none" stroke="#CFE0FF" stroke-width=".6" stroke-linejoin="round" opacity=".35"></path>
+  <polygon points="22.98,41.02 22.98,22.98 41.02,22.98" fill="#CFE0FF" opacity="0.4"></polygon>
+</svg>

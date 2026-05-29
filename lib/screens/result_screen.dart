@@ -67,6 +67,13 @@ class _ResultScreenState extends State<ResultScreen> {
 
     _lpAfter = (_lpBefore + _lpChange).clamp(0, 99999);
     AppSettings.setPlayerLP(_lpAfter); // kalıcı yaz (async, UI etkilemez)
+
+    // Maç sonucu sesi
+    if (kazandim) {
+      AppSettings.sesMacKazanma();
+    } else {
+      AppSettings.sesMacKaybetme();
+    }
   }
 
   @override
