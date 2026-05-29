@@ -7,7 +7,7 @@ import '../services/ownership_db.dart';
 class ClaimResult {
   /// Sahiplenme gerçekleştiyse true (zar tutmadıysa false).
   final bool claimed;
-  final RarityLevel rarity;
+  final WordRarity rarity;
 
   /// Kelime başka birisindeyken alındıysa true ("çalındı").
   final bool isSteal;
@@ -22,71 +22,46 @@ class ClaimResult {
     this.previousOwner,
   });
 
-  static ClaimResult miss(RarityLevel rarity) =>
+  static ClaimResult miss(WordRarity rarity) =>
       ClaimResult(claimed: false, rarity: rarity);
 }
 
 // ─── Engine ───────────────────────────────────────────────────────────────────
 
-/// Tetikleme algoritması.
-///
-/// Kullanım örnekleri:
-///
-///   // Flash kart: kart açıldığında çağrılır
-///   final result = await OwnershipEngine.tryClaimFlashcard(
-///     level: 'A', rank: 5,
-///   );
-///   if (result.claimed) showClaimBanner(result);
+/// Tetikleme algoritması — yeni setId tabanlı API.
 ///
 ///   // Düello: ilk doğru cevap veren oyuncuyu geçer
 ///   await OwnershipEngine.claimDuelWord(
-///     level: 'B', rank: 30, playerId: 'Sen',
+///     setId: 'CI', rank: 137, playerId: 'Sen',
 ///   );
 class OwnershipEngine {
   OwnershipEngine._();
 
   static final _rng = Random();
 
-  // WordEntry.level + WordEntry.rank → stabil kelime ID'si ("A01" … "C80")
-  static String wordIdOf(String level, int rank) =>
-      '$level${rank.toString().padLeft(2, '0')}';
-
-  // ── Flash kart ──────────────────────────────────────────────────────────────
-
-  /// Flash kart her çevrildiğinde (ön → arka) çağrılır.
-  ///
-  /// Zar atılır; olasılık tutarsa kelime sahiplenilir.
-  /// Önceki sahibi varsa ve farklı bir oyuncuysa [ClaimResult.isSteal] = true.
-  static Future<ClaimResult> tryClaimFlashcard({
-    required String level,
-    required int rank,
-    String playerId = 'Sen',
-  }) async {
-    final rarity = WordRarity.fromRank(rank);
-    if (_rng.nextDouble() >= rarity.flashcardClaimChance) {
-      return ClaimResult.miss(rarity);
-    }
-    return _doClaim(
-      wordId: wordIdOf(level, rank),
-      rarity: rarity,
-      playerId: playerId,
-      source: 'flashcard',
-    );
-  }
+  /// Stabil kelime ID'si — ownership tablosunda PK.
+  /// Format: `setId-NNNN` (örn. "BII-0042").
+  static String wordIdOf(String setId, int rank) =>
+      '$setId-${rank.toString().padLeft(4, '0')}';
 
   // ── Düello ──────────────────────────────────────────────────────────────────
 
-  /// Düelloda soruya ilk doğru cevap veren oyuncu çağrılır.
+  /// Düelloda soruya doğru cevap veren oyuncu için çağrılır.
   ///
-  /// Olasılık yoktur — doğru cevap her zaman sahiplenmeyi tetikler.
+  /// `WordRarity.duelClaimChance` üzerinden bir zar atılır; tutmazsa
+  /// [ClaimResult.miss] döner ve sahiplenme gerçekleşmez. Tutarsa
+  /// kelime kullanıcıya yazılır (önceki sahibi varsa `isSteal=true`).
   static Future<ClaimResult> claimDuelWord({
-    required String level,
+    required String setId,
     required int rank,
     required String playerId,
   }) async {
-    final rarity = WordRarity.fromRank(rank);
+    final rarity = WordRarityMath.rarityForIndex(setId: setId, index: rank);
+    if (_rng.nextDouble() >= rarity.duelClaimChance) {
+      return ClaimResult.miss(rarity);
+    }
     return _doClaim(
-      wordId: wordIdOf(level, rank),
+      wordId: wordIdOf(setId, rank),
       rarity: rarity,
       playerId: playerId,
       source: 'duel',
@@ -95,11 +70,11 @@ class OwnershipEngine {
 
   // ── Sorgular ────────────────────────────────────────────────────────────────
 
-  static Future<String?> getOwner(String level, int rank) =>
-      OwnershipDb.getOwner(wordIdOf(level, rank));
+  static Future<String?> getOwner(String setId, int rank) =>
+      OwnershipDb.getOwner(wordIdOf(setId, rank));
 
-  static Future<bool> isOwnedBy(String level, int rank, String playerId) async {
-    final owner = await OwnershipDb.getOwner(wordIdOf(level, rank));
+  static Future<bool> isOwnedBy(String setId, int rank, String playerId) async {
+    final owner = await OwnershipDb.getOwner(wordIdOf(setId, rank));
     return owner == playerId;
   }
 
@@ -110,7 +85,7 @@ class OwnershipEngine {
 
   static Future<ClaimResult> _doClaim({
     required String wordId,
-    required RarityLevel rarity,
+    required WordRarity rarity,
     required String playerId,
     required String source,
   }) async {

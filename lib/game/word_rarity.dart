@@ -1,60 +1,200 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
-enum RarityLevel { common, uncommon, rare, legendary }
+/// 6 kademeli enderlik sistemi (eski 4'lü RarityLevel'in yerine).
+enum WordRarity { common, uncommon, rare, epic, legendary, mythic }
 
-extension RarityLevelExt on RarityLevel {
+extension WordRarityExt on WordRarity {
+  /// İngilizce upper-case etiket (rozet/koleksiyon başlıkları).
   String get label {
     switch (this) {
-      case RarityLevel.common:    return 'COMMON';
-      case RarityLevel.uncommon:  return 'UNCOMMON';
-      case RarityLevel.rare:      return 'RARE';
-      case RarityLevel.legendary: return 'LEGENDARY';
+      case WordRarity.common:    return 'COMMON';
+      case WordRarity.uncommon:  return 'UNCOMMON';
+      case WordRarity.rare:      return 'RARE';
+      case WordRarity.epic:      return 'EPIC';
+      case WordRarity.legendary: return 'LEGENDARY';
+      case WordRarity.mythic:    return 'MYTHIC';
     }
   }
 
+  /// Türkçe kullanıcı yüzü etiketi.
+  String get labelTr {
+    switch (this) {
+      case WordRarity.common:    return 'Sıradan';
+      case WordRarity.uncommon:  return 'Sıradışı';
+      case WordRarity.rare:      return 'Ender';
+      case WordRarity.epic:      return 'Destansı';
+      case WordRarity.legendary: return 'Efsanevi';
+      case WordRarity.mythic:    return 'Mistik';
+    }
+  }
+
+  /// Birincil UI rengi (kart kenarlığı / rozet).
+  /// `assets/enderlik/` ikon setiyle senkronize palet.
   Color get color {
     switch (this) {
-      case RarityLevel.common:    return Colors.white54;
-      case RarityLevel.uncommon:  return const Color(0xFF4CAF50);
-      case RarityLevel.rare:      return const Color(0xFF2979FF);
-      case RarityLevel.legendary: return const Color(0xFFFFD600);
+      case WordRarity.common:    return const Color(0xFF9BA2AD);
+      case WordRarity.uncommon:  return const Color(0xFF4ADE80);
+      case WordRarity.rare:      return const Color(0xFF5B9BFF);
+      case WordRarity.epic:      return const Color(0xFFC18BFF);
+      case WordRarity.legendary: return const Color(0xFFFCD34D);
+      case WordRarity.mythic:    return const Color(0xFFFF7088);
     }
   }
 
-  // Flash kart açılışında sahiplenme olasılığı (zor/koleksiyoncu preset)
-  double get flashcardClaimChance {
+  /// İkonun yaydığı ışıltı tonu (alfa dahil). Common için neredeyse şeffaf.
+  Color get glow {
     switch (this) {
-      case RarityLevel.common:    return 0.10;  // ~10 açılışta 1
-      case RarityLevel.uncommon:  return 0.04;  // ~25 açılışta 1
-      case RarityLevel.rare:      return 0.01;  // ~100 açılışta 1
-      case RarityLevel.legendary: return 0.002; // ~500 açılışta 1
+      case WordRarity.common:    return const Color(0x009BA2AD);
+      case WordRarity.uncommon:  return const Color(0x4234D058);
+      case WordRarity.rare:      return const Color(0x4D3B82F6);
+      case WordRarity.epic:      return const Color(0x57A855F7);
+      case WordRarity.legendary: return const Color(0x6BFBA316);
+      case WordRarity.mythic:    return const Color(0x80FF3D63);
     }
   }
 
+  /// SVG asset yolu. `assets/enderlik/` klasöründeki tasarım ikonu.
+  /// Enum adı (İngilizce) → Türkçe dosya adı eşlemesi.
+  String get assetPath {
+    switch (this) {
+      case WordRarity.common:    return 'assets/enderlik/enderlik_siradan.svg';
+      case WordRarity.uncommon:  return 'assets/enderlik/enderlik_siradisi.svg';
+      case WordRarity.rare:      return 'assets/enderlik/enderlik_ender.svg';
+      case WordRarity.epic:      return 'assets/enderlik/enderlik_destansi.svg';
+      case WordRarity.legendary: return 'assets/enderlik/enderlik_efsanevi.svg';
+      case WordRarity.mythic:    return 'assets/enderlik/enderlik_mistik.svg';
+    }
+  }
+
+  /// Düelloda doğru cevap verildiğinde sahiplenme (claim) olasılığı.
+  /// Mythic hariç tüm enderlikler %20; mythic %10 (yarı).
+  /// Sonuç: belirli bir doğru cevabın kart kazandırma şansı ~%20.
+  double get duelClaimChance {
+    switch (this) {
+      case WordRarity.common:    return 0.20;
+      case WordRarity.uncommon:  return 0.20;
+      case WordRarity.rare:      return 0.20;
+      case WordRarity.epic:      return 0.20;
+      case WordRarity.legendary: return 0.20;
+      case WordRarity.mythic:    return 0.10;
+    }
+  }
+
+  /// Fame puanı çarpanı (koleksiyon skoru).
   int get fameMultiplier {
     switch (this) {
-      case RarityLevel.common:    return 1;
-      case RarityLevel.uncommon:  return 3;
-      case RarityLevel.rare:      return 10;
-      case RarityLevel.legendary: return 50;
+      case WordRarity.common:    return 1;
+      case WordRarity.uncommon:  return 3;
+      case WordRarity.rare:      return 10;
+      case WordRarity.epic:      return 25;
+      case WordRarity.legendary: return 75;
+      case WordRarity.mythic:    return 250;
     }
   }
 }
 
-class WordRarity {
-  WordRarity._();
+/// Set içi dağılım & yardımcı statik fonksiyonlar.
+class WordRarityMath {
+  WordRarityMath._();
 
-  // WordEntry.rank (1-80 içi) → nadirlik
-  // rank 1-20  = X100 tier = Common
-  // rank 21-40 = X250 tier = Uncommon
-  // rank 41-60 = X500 tier = Rare
-  // rank 61-80 = X1K tier  = Legendary
-  static RarityLevel fromRank(int rank) {
-    if (rank <= 20) return RarityLevel.common;
-    if (rank <= 40) return RarityLevel.uncommon;
-    if (rank <= 60) return RarityLevel.rare;
-    return RarityLevel.legendary;
+  /// Set kimliğinden (A / BI / BII / BIII / CI / CII / CIII) üst seviye harfi.
+  static String levelOf(String setId) {
+    if (setId.isEmpty) throw ArgumentError('setId boş olamaz');
+    return setId.substring(0, 1).toUpperCase();
   }
 
-  static RarityLevel fromDb(String s) => RarityLevel.values.byName(s);
+  /// 1000 kelimelik set içinde, 0-999 indeksine göre enderliği döner.
+  ///
+  /// Sabit dağılımlar (set başına):
+  ///   A:  400C / 300U / 225R / 75E
+  ///   B:  300C / 300U / 250R / 125E / 25L
+  ///   C:  250C / 250U / 250R / 190E / 50L / 10M
+  ///
+  /// DB'de `rarity` kolonu önceden doldurulduysa burayı çağırmaya gerek yok;
+  /// bu fonksiyon DB seed yazımında ve fallback olarak kullanılır.
+  static WordRarity rarityForIndex({required String setId, required int index}) {
+    assert(index >= 0 && index < 1000, 'index 0-999 aralığında olmalı');
+    final level = levelOf(setId);
+    switch (level) {
+      case 'A':
+        if (index < 400) return WordRarity.common;
+        if (index < 700) return WordRarity.uncommon;
+        if (index < 925) return WordRarity.rare;
+        return WordRarity.epic;
+      case 'B':
+        if (index < 300) return WordRarity.common;
+        if (index < 600) return WordRarity.uncommon;
+        if (index < 850) return WordRarity.rare;
+        if (index < 975) return WordRarity.epic;
+        return WordRarity.legendary;
+      case 'C':
+        if (index < 250) return WordRarity.common;
+        if (index < 500) return WordRarity.uncommon;
+        if (index < 750) return WordRarity.rare;
+        if (index < 940) return WordRarity.epic;
+        if (index < 990) return WordRarity.legendary;
+        return WordRarity.mythic;
+      default:
+        // D / E seviyeleri ileride eklenirse buraya gelir.
+        throw ArgumentError('Bilinmeyen set seviyesi: $level (setId=$setId)');
+    }
+  }
+
+  /// SQLite TEXT → enum.
+  static WordRarity fromDb(String s) => WordRarity.values.byName(s);
+
+  /// Verilen setin desteklediği maksimum enderlik.
+  /// A → epic, B → legendary, C → mythic. UI'da bu seviyeden yüksek
+  /// enderlik butonları kilitli gösterilir.
+  static WordRarity maxRarityForSet(String setId) {
+    switch (levelOf(setId)) {
+      case 'A': return WordRarity.epic;
+      case 'B': return WordRarity.legendary;
+      case 'C': return WordRarity.mythic;
+      default:
+        throw ArgumentError('Bilinmeyen set seviyesi: $setId');
+    }
+  }
+
+  /// `rarity`, `setId` için desteklenmiyorsa true (UI kilit kontrolü).
+  static bool isLockedForSet(String setId, WordRarity rarity) =>
+      rarity.index > maxRarityForSet(setId).index;
+
+  /// Set + tier kombinasyonunda ulaşılabilecek maksimum enderlik.
+  /// `rarityForIndex(setId, cap-1)` → o tier'daki son kelimenin raritysi
+  /// = havuzda varolan en yüksek enderlik seviyesi.
+  static WordRarity maxRarityForSetAndTier(String setId, String tier) {
+    final int cap = switch (tier) {
+      '100' => 100,
+      '250' => 250,
+      '500' => 500,
+      _     => 1000, // '1K' ve bilinmeyen → setin tamamı
+    };
+    return rarityForIndex(setId: setId, index: cap - 1);
+  }
+
+  /// Set + tier havuzunda belirtilen rarity kilitli mi?
+  static bool isLockedForSetAndTier(
+          String setId, String tier, WordRarity rarity) =>
+      rarity.index > maxRarityForSetAndTier(setId, tier).index;
+}
+
+/// Tek başına SVG enderlik ikonu. `assets/enderlik/` setinden çekilir.
+///
+/// Liste/rozet boyutu: 22–28 px, kart/detay: 40–64 px (tasarım rehberi).
+class RarityIcon extends StatelessWidget {
+  const RarityIcon(this.rarity, {super.key, this.size = 22});
+
+  final WordRarity rarity;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SvgPicture.asset(
+      rarity.assetPath,
+      width: size,
+      height: size,
+    );
+  }
 }

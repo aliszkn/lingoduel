@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -15,6 +16,13 @@ class AppSettings {
   static const _kMesajBildirim = 'mesaj_bildirimleri_acik';
   static const _kPlayerLP           = 'player_lp';
   static const _kSoftStartCompleted = 'soft_start_completed';
+  static const _kToplamMac          = 'toplam_mac';
+  static const _kKazanilanMac       = 'kazanilan_mac';
+  static const _kKazanmaSerisi      = 'kazanma_serisi';
+
+  /// Bir maç kaydedildiğinde value artırılır.
+  /// ProfilePanel bunu dinleyip geçmişi otomatik yeniler.
+  static final matchSavedNotifier = ValueNotifier<int>(0);
 
   static late SharedPreferences _prefs;
 
@@ -32,6 +40,15 @@ class AppSettings {
   /// Bu nokta geçildiğinde A-grubu soft start kalıcı olarak biter.
   static bool softStartCompleted = false;
 
+  /// Tamamlanmış toplam maç sayısı (Profil ekranında "Toplam Maç" karşılığı).
+  static int toplamMac = 0;
+
+  /// Kazanılan maç sayısı — sıralama 1, 2 veya 3 ise kazanım sayılır.
+  static int kazanilanMac = 0;
+
+  /// Üst üste galibiyet sayısı. Galibiyette artar, kayıpta sıfırlanır.
+  static int kazanmaSerisi = 0;
+
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     sfxAcik = _prefs.getBool(_kSfx) ?? true;
@@ -41,7 +58,34 @@ class AppSettings {
     mesajBildirimleriAcik = _prefs.getBool(_kMesajBildirim) ?? true;
     playerLP          = _prefs.getInt(_kPlayerLP) ?? 0;
     softStartCompleted = _prefs.getBool(_kSoftStartCompleted) ?? false;
+    toplamMac          = _prefs.getInt(_kToplamMac) ?? 0;
+    kazanilanMac       = _prefs.getInt(_kKazanilanMac) ?? 0;
+    kazanmaSerisi      = _prefs.getInt(_kKazanmaSerisi) ?? 0;
   }
+
+  /// Maç sonunda çağrılır. [won] galibiyet yarısında (üst yarı) bitirildiyse true.
+  /// Galibiyette kazanma serisi artar, kayıpta sıfırlanır.
+  /// Sayaçlar diskte güncellenir.
+  static Future<void> recordMatchResult(bool won) async {
+    toplamMac += 1;
+    if (won) {
+      kazanilanMac += 1;
+      kazanmaSerisi += 1;
+    } else {
+      kazanmaSerisi = 0;
+    }
+    await _prefs.setInt(_kToplamMac, toplamMac);
+    await _prefs.setInt(_kKazanilanMac, kazanilanMac);
+    await _prefs.setInt(_kKazanmaSerisi, kazanmaSerisi);
+  }
+
+  /// 0-100 aralığında kazanma oranı; hiç maç yoksa null döner.
+  static double? get kazanmaOraniYuzde =>
+      toplamMac == 0 ? null : (kazanilanMac / toplamMac) * 100;
+
+  /// Üst üste galibiyet bonusu (LP). İlk galibiyet (seri=1) bonussuz;
+  /// 2. galibiyet +2, 3. +3, …, n. +n.
+  static int get seriBonusu => kazanmaSerisi >= 2 ? kazanmaSerisi : 0;
 
   static Future<void> setSfx(bool v) async {
     sfxAcik = v;

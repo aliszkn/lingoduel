@@ -42,29 +42,16 @@ class MatchOutcome {
   const MatchOutcome({required this.room, required this.results});
 }
 
-// ─── Sabit Tablo: Taban LP ────────────────────────────────────────────────────
+// ─── Merdiven Tabloları ───────────────────────────────────────────────────────
 //
-// Oyuncunun açabildiği en yüksek odada (atMax) oynadığında geçerli taban değer.
+// Oyuncu sayısından bağımsız genelleştirilmiş LP tabloları.
+// Kazananlar (üst yarı): en iyi → daha düşük sıralıya.
+// Kaybedenler (alt yarı): eşiğe en yakın → en alta.
+// 6 kişilik maçta birebir eski _kBaseLP / _kFixedLP değerlerini verir.
 
-const Map<int, int> _kBaseLP = {
-  1: 12,
-  2:  6,
-  3:  4,
-  4: -2,
-  5: -3,
-  6: -6,
-};
-
-// ─── Sabit Tablo: 2+ Alt Seviye (Kolay Puan Filtresi) ────────────────────────
-
-const Map<int, int> _kFixedLP = {
-  1:  2,
-  2:  1,
-  3:  1,
-  4: -2,
-  5: -3,
-  6: -6,
-};
+const List<int> _kBasePos  = [12, 6, 4];  // kazananlar taban LP (atMax)
+const List<int> _kFixedPos = [2, 1, 1];   // kazananlar sabit LP (2+ alt seviye)
+const List<int> _kNeg      = [-2, -3, -6]; // kaybedenler (her seviyede aynı)
 
 // ─── Oda Seviyesi Farkı ───────────────────────────────────────────────────────
 
@@ -87,11 +74,34 @@ enum _LevelDiff {
 class MatchScoring {
   MatchScoring._();
 
+  /// Galibiyet eşiği: üst yarı (yukarı yuvarlama) kazanır.
+  /// 2k→1, 3k→2, 4k→2, 5k→3, 6k→3.
+  static bool isWin(int position, int playerCount) =>
+      position <= (playerCount + 1) ~/ 2;
+
+  /// Oyuncu sayısına duyarlı LP merdiveni.
+  /// Kazananlar (pozisyon ≤ winnerCount): pos listesinden alır.
+  /// Kaybedenler: neg listesinden alır (en iyi kaybeden en düşük ceza).
+  static int _ladder(
+    int position,
+    int playerCount,
+    List<int> pos,
+    List<int> neg,
+  ) {
+    final w = (playerCount + 1) ~/ 2; // kazanan sayısı
+    if (position <= w) {
+      return pos[(position - 1).clamp(0, pos.length - 1)];
+    }
+    final loserRank = position - w; // 1 = eşiğe en yakın kaybeden
+    return neg[(loserRank - 1).clamp(0, neg.length - 1)];
+  }
+
   /// Tek bir oyuncunun maç sonu LP değişimini hesaplar.
   ///
-  /// [position]  : Maçtaki sıralama (1–6)
-  /// [playerLp]  : Maç ÖNCESI LP
-  /// [room]      : Oynanan oda
+  /// [position]    : Maçtaki sıralama (1 tabanlı)
+  /// [playerLp]    : Maç ÖNCESI LP
+  /// [room]        : Oynanan oda
+  /// [playerCount] : Odadaki toplam oyuncu sayısı (varsayılan 6)
   ///
   /// Dönen değer doğrudan `playerLp` üzerine eklenir; lpAfter = playerLp + sonuç.
   static int calculateLPChange({
@@ -99,37 +109,39 @@ class MatchScoring {
     required int playerLp,
     required RoomDefinition room,
     bool softStartCompleted = false,
+    int playerCount = 6,
   }) {
-    assert(position >= 1 && position <= 6, 'Sıralama 1-6 arasında olmalı');
+    assert(position >= 1 && position <= playerCount,
+        'Sıralama 1-$playerCount arasında olmalı');
 
-    final diff       = _levelDiff(playerLp, room);
-    final isGain     = position <= 3;
-    final softStart  = LeagueRules.isSoftStart(
+    final diff      = _levelDiff(playerLp, room);
+    final isGain    = isWin(position, playerCount);
+    final softStart = LeagueRules.isSoftStart(
       playerLp, softStartCompleted: softStartCompleted,
     );
 
     switch (diff) {
       // ── 2+ kademe aşağı: sabit tablo ──────────────────────────────────
       case _LevelDiff.twoOrMoreBelow:
-        final pts = _kFixedLP[position]!;
+        final pts = _ladder(position, playerCount, _kFixedPos, _kNeg);
         if (!isGain && softStart) return 0;
         return pts;
 
       // ── Max odanın üstü: pozitif x1.5, negatif değişmez ──────────────
       case _LevelDiff.aboveMax:
-        final base = _kBaseLP[position]!;
+        final base = _ladder(position, playerCount, _kBasePos, _kNeg);
         if (!isGain) return softStart ? 0 : base;
         return (base * 1.5).round();
 
       // ── Tam max odada: taban puan ──────────────────────────────────────
       case _LevelDiff.atMax:
-        final base = _kBaseLP[position]!;
+        final base = _ladder(position, playerCount, _kBasePos, _kNeg);
         if (!isGain && softStart) return 0;
         return base;
 
       // ── 1 kademe aşağı: pozitif x0.5, negatif değişmez ───────────────
       case _LevelDiff.oneLevelBelow:
-        final base = _kBaseLP[position]!;
+        final base = _ladder(position, playerCount, _kBasePos, _kNeg);
         if (!isGain) return softStart ? 0 : base;
         return (base * 0.5).round();
     }

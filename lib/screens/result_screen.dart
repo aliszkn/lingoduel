@@ -3,16 +3,23 @@ import '../core/app_colors.dart';
 import '../game/league_models.dart';
 import '../game/league_rules.dart';
 import '../game/match_scoring.dart';
+import '../game/word_rarity.dart';
+import '../game/word_sets.dart';
+import '../models/word_entry.dart';
 import '../services/app_settings.dart';
 
 class ResultScreen extends StatefulWidget {
   final List<Map<String, dynamic>> players;
-  final String odaLig;
+  final String odaSetId;
+  final String odaTier;
+  final List<WordEntry> kazanilanKelimeler;
 
   const ResultScreen({
     super.key,
     required this.players,
-    required this.odaLig,
+    required this.odaSetId,
+    required this.odaTier,
+    this.kazanilanKelimeler = const [],
   });
 
   @override
@@ -23,6 +30,8 @@ class _ResultScreenState extends State<ResultScreen> {
   late final int _lpChange;
   late final int _lpBefore;
   late final int _lpAfter;
+  late final int _seriBonus;   // bu maçta serinin getirdiği ek LP
+  late final int _seriUzunluk; // güncel kazanma serisi (gösterim için)
 
   @override
   void initState() {
@@ -30,18 +39,31 @@ class _ResultScreenState extends State<ResultScreen> {
     _lpBefore = AppSettings.playerLP;
 
     final int senIndex = widget.players.indexWhere((p) => p['isim'] == 'Sen');
-    final RoomDefinition? room = roomById(widget.odaLig);
+    final RoomDefinition? room =
+        roomForSetAndTier(widget.odaSetId, widget.odaTier);
 
+    final int oyuncuSayisi = widget.players.length;
+    int baseChange;
     if (senIndex >= 0 && room != null) {
-      _lpChange = MatchScoring.calculateLPChange(
+      baseChange = MatchScoring.calculateLPChange(
         position: senIndex + 1, // players sıralamaya göre gelir (0 = 1.)
         playerLp: _lpBefore,
         room: room,
         softStartCompleted: AppSettings.softStartCompleted,
+        playerCount: oyuncuSayisi,
       );
     } else {
-      _lpChange = 0;
+      baseChange = 0;
     }
+
+    // Kazanma serisi bonusu — yalnızca galibiyette (üst yarı).
+    // recordMatchResult game_screen'de bu ekrandan önce çağrıldığı için
+    // kazanmaSerisi/seriBonusu güncel okunur.
+    final bool kazandim = senIndex >= 0 &&
+        MatchScoring.isWin(senIndex + 1, oyuncuSayisi);
+    _seriUzunluk = AppSettings.kazanmaSerisi;
+    _seriBonus = kazandim ? AppSettings.seriBonusu : 0;
+    _lpChange = baseChange + _seriBonus;
 
     _lpAfter = (_lpBefore + _lpChange).clamp(0, 99999);
     AppSettings.setPlayerLP(_lpAfter); // kalıcı yaz (async, UI etkilemez)
@@ -70,6 +92,10 @@ class _ResultScreenState extends State<ResultScreen> {
                 _oyuncuSatiri(i, widget.players[i]['isim'] == 'Sen'),
               const SizedBox(height: 30),
               _lpDegisimKarti(),
+              if (widget.kazanilanKelimeler.isNotEmpty) ...[
+                const SizedBox(height: 30),
+                _kazanilanKelimelerKarti(),
+              ],
               const SizedBox(height: 30),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -245,11 +271,103 @@ class _ResultScreenState extends State<ResultScreen> {
                 ),
               ),
             ],
+            if (_seriBonus > 0) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.orangeAccent.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '🔥 $_seriUzunluk maçlık galibiyet serisi: +$_seriBonus LP',
+                  style: const TextStyle(
+                    color: Colors.orangeAccent,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
   }
 
-  String get odaLigStr => widget.odaLig;
+  String get odaLigStr => '${widget.odaSetId} • ${widget.odaTier} ODA';
+
+  Widget _kazanilanKelimelerKarti() {
+    final List<WordEntry> kelimeler = widget.kazanilanKelimeler;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppColors.yuzey,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.workspace_premium_rounded,
+                  color: AppColors.sari,
+                  size: 22,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'KAZANDIĞIN KELİMELER (${kelimeler.length})',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final w in kelimeler) _kelimePill(w),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _kelimePill(WordEntry w) {
+    final WordRarity r = w.rarity;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: r.color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: r.color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          RarityIcon(r, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            w.en,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

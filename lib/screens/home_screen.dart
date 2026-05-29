@@ -4,11 +4,14 @@ import 'package:flutter/services.dart';
 import '../core/app_colors.dart';
 import '../game/league_models.dart';
 import '../game/league_rules.dart';
+import '../game/match_scoring.dart';
 import '../game/word_rarity.dart';
+import '../game/word_sets.dart';
 import '../game/ownership_engine.dart';
+import '../models/word_entry.dart';
 import '../services/app_settings.dart';
+import '../services/database_helper.dart';
 import '../services/ownership_db.dart';
-import '../data/word_pool.dart';
 import 'game_screen.dart';
 
 // ==========================================
@@ -118,27 +121,55 @@ class CardsPanel extends StatefulWidget {
 }
 
 class _CardsPanelState extends State<CardsPanel> {
-  String secilenSeviye = 'A';
-  int secilenSayi = 3;
-  int secilenKapsam = 100;
+  static const int _kKartAdedi = 5;
 
+  String secilenSetId = 'A';
+  String secilenTier = '1K'; // varsayılan: tüm kelimeler (mevcut davranış korunur)
+  WordRarity secilenRarity = WordRarity.common;
+
+  /// Aktif set + tier'ın cap'li kelime listesi (DB'den çekilir, RAM'de cache'lenir).
+  List<WordEntry> _setKelimeleri = const [];
+
+  /// Set/tier yüklemesi devam ediyor mu (UI spinner için).
+  bool _setYukleniyor = true;
+
+  /// Ekranda gösterilen N rastgele kelime (setId/tier/enderlik değişince yenilenir).
   List<Map<String, dynamic>> ekrandakiKelimeler = [];
-
-  /// Seviye + kapsam → WordPool lig kodu (örn. A + 250 → 'A250', C + 1000 → 'C1K').
-  String get _ligKodu =>
-      '$secilenSeviye${secilenKapsam == 1000 ? '1K' : secilenKapsam}';
 
   @override
   void initState() {
     super.initState();
+    _havuzuYukle(secilenSetId, secilenTier);
+  }
+
+  /// Verilen set + tier'a göre kelime havuzunu DB'den çeker, kart örneklerini yeniler.
+  Future<void> _havuzuYukle(String setId, String tier) async {
+    setState(() => _setYukleniyor = true);
+    final int cap = switch (tier) {
+      '100' => 100,
+      '250' => 250,
+      '500' => 500,
+      _ => 1000, // '1K' ve bilinmeyen → setin tamamı
+    };
+    final words = await DatabaseHelper.getWordsBySetIdCapped(setId, cap);
+    if (!mounted) return;
+    setState(() {
+      _setKelimeleri = words;
+      _setYukleniyor = false;
+    });
     kelimeleriGetir();
   }
 
+  /// Aktif set + enderlik filtresine göre kelime havuzu (Map listesi).
+  List<Map<String, dynamic>> _aktifHavuz() => _setKelimeleri
+      .where((w) => w.rarity == secilenRarity)
+      .map((w) => w.toMap())
+      .toList()
+    ..shuffle();
+
   void kelimeleriGetir() {
-    final havuz = WordPool.forLeague(_ligKodu).map((w) => w.toMap()).toList()
-      ..shuffle();
-    int miktar = secilenSayi;
-    if (miktar > havuz.length) miktar = havuz.length;
+    final havuz = _aktifHavuz();
+    final miktar = havuz.length < _kKartAdedi ? havuz.length : _kKartAdedi;
     setState(() {
       ekrandakiKelimeler = havuz.isEmpty ? [] : havuz.sublist(0, miktar);
     });
@@ -146,8 +177,7 @@ class _CardsPanelState extends State<CardsPanel> {
 
   void tekKelimeDegistir(int index) {
     AppSettings.selectionClick();
-    final havuz = WordPool.forLeague(_ligKodu).map((w) => w.toMap()).toList()
-      ..shuffle();
+    final havuz = _aktifHavuz();
     if (havuz.isEmpty) return;
     setState(() {
       ekrandakiKelimeler[index] = havuz.first;
@@ -224,7 +254,7 @@ class _CardsPanelState extends State<CardsPanel> {
         const Padding(
           padding: EdgeInsets.fromLTRB(24, 15, 24, 6),
           child: Text(
-            'SEVİYE',
+            'SET (1000 KELİME)',
             style: TextStyle(
               color: Colors.white24,
               fontSize: 10,
@@ -238,12 +268,17 @@ class _CardsPanelState extends State<CardsPanel> {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Row(
             children: [
-              for (String s in ['A', 'B', 'C'])
-                _secimButonu(s, secilenSeviye == s, () {
+              for (String s in DatabaseHelper.kAllSetIds)
+                _secimButonu(s, secilenSetId == s, () {
+                  if (secilenSetId == s) return;
                   setState(() {
-                    secilenSeviye = s;
-                    kelimeleriGetir();
+                    secilenSetId = s;
+                    if (WordRarityMath.isLockedForSetAndTier(
+                        s, secilenTier, secilenRarity)) {
+                      secilenRarity = WordRarity.common;
+                    }
                   });
+                  _havuzuYukle(s, secilenTier);
                 }),
             ],
           ),
@@ -251,7 +286,7 @@ class _CardsPanelState extends State<CardsPanel> {
         const Padding(
           padding: EdgeInsets.fromLTRB(24, 15, 24, 6),
           child: Text(
-            'KAPSAM (POPÜLERLİK)',
+            'KADEMESİ',
             style: TextStyle(
               color: Colors.white24,
               fontSize: 10,
@@ -265,24 +300,26 @@ class _CardsPanelState extends State<CardsPanel> {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Row(
             children: [
-              for (int k in [100, 250, 500, 1000])
-                _secimButonu(
-                  k == 1000 ? 'İlk 1K' : 'İlk $k',
-                  secilenKapsam == k,
-                  () {
-                    setState(() {
-                      secilenKapsam = k;
-                      kelimeleriGetir();
-                    });
-                  },
-                ),
+              for (final t in ['100', '250', '500', '1K'])
+                _secimButonu(t, secilenTier == t, () {
+                  if (secilenTier == t) return;
+                  AppSettings.selectionClick();
+                  setState(() {
+                    secilenTier = t;
+                    if (WordRarityMath.isLockedForSetAndTier(
+                        secilenSetId, t, secilenRarity)) {
+                      secilenRarity = WordRarity.common;
+                    }
+                  });
+                  _havuzuYukle(secilenSetId, t);
+                }),
             ],
           ),
         ),
         const Padding(
           padding: EdgeInsets.fromLTRB(24, 15, 24, 6),
           child: Text(
-            'ADET',
+            'ENDERLİK',
             style: TextStyle(
               color: Colors.white24,
               fontSize: 10,
@@ -291,38 +328,105 @@ class _CardsPanelState extends State<CardsPanel> {
             ),
           ),
         ),
-        Padding(
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Row(
             children: [
-              for (int n in [1, 3, 5])
-                _secimButonu('$n Kelime', secilenSayi == n, () {
-                  setState(() {
-                    secilenSayi = n;
-                    kelimeleriGetir();
-                  });
-                }),
+              for (WordRarity r in WordRarity.values) _enderlikButonu(r),
             ],
           ),
         ),
         const SizedBox(height: 20),
         Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
-            itemCount: ekrandakiKelimeler.length,
-            itemBuilder: (context, index) {
-              return KelimeKarti(
-                key: ValueKey(ekrandakiKelimeler[index]['en'] + secilenSeviye),
-                data: ekrandakiKelimeler[index],
-                onNewWord: () => tekKelimeDegistir(index),
-                temaRengi: AppColors.cyan,
-                golgeRengi: AppColors.cyanKoyu,
-                level: secilenSeviye,
-              );
-            },
-          ),
+          child: _setYukleniyor
+              ? const Center(
+                  child: CircularProgressIndicator(color: AppColors.cyan),
+                )
+              : ekrandakiKelimeler.isEmpty
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Text(
+                          'Bu enderlikte henüz kelime yok.',
+                          style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+                      itemCount: ekrandakiKelimeler.length,
+                      itemBuilder: (context, index) {
+                        return KelimeKarti(
+                          key: ValueKey(
+                            '$secilenSetId-${ekrandakiKelimeler[index]['en']}',
+                          ),
+                          data: ekrandakiKelimeler[index],
+                          onNewWord: () => tekKelimeDegistir(index),
+                          temaRengi: AppColors.cyan,
+                          golgeRengi: AppColors.cyanKoyu,
+                          setId: secilenSetId,
+                        );
+                      },
+                    ),
         ),
       ],
+    );
+  }
+
+  /// Enderlik filtre butonu. Set'in maks enderliğinin üzerindeki seviyeler
+  /// kilit ikonu ile gri renkte gösterilir ve tıklanamaz.
+  Widget _enderlikButonu(WordRarity r) {
+    final secili = secilenRarity == r;
+    final kilitli = WordRarityMath.isLockedForSetAndTier(
+        secilenSetId, secilenTier, r);
+    return GestureDetector(
+      onTap: kilitli
+          ? null
+          : () {
+              if (secilenRarity == r) return;
+              AppSettings.selectionClick();
+              setState(() => secilenRarity = r);
+              kelimeleriGetir();
+            },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(right: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: kilitli
+              ? AppColors.butonArka.withValues(alpha: 0.4)
+              : (secili ? r.color : AppColors.butonArka),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: kilitli
+                ? Colors.white12
+                : (secili ? r.color : r.color.withValues(alpha: 0.35)),
+          ),
+        ),
+        child: Row(
+          children: [
+            if (kilitli)
+              const Icon(Icons.lock, size: 12, color: Colors.white38)
+            else
+              RarityIcon(r, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              r.labelTr,
+              style: TextStyle(
+                color: kilitli
+                    ? Colors.white38
+                    : (secili ? Colors.black : Colors.white70),
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -330,6 +434,7 @@ class _CardsPanelState extends State<CardsPanel> {
 // ==========================================
 // --- PANEL 2: PROFİL VE SOSYAL PANEL ---
 // ==========================================
+
 class ProfilePanel extends StatefulWidget {
   const ProfilePanel({super.key});
 
@@ -341,6 +446,10 @@ class _ProfilePanelState extends State<ProfilePanel>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   IconData aktifAvatar = Icons.person_rounded;
+
+  List<MatchRecord> _macGecmisi = [];
+  bool _gecmisYukleniyor = true;
+  final Set<int> _acikMaclar = {}; // açık maç kartı id'leri
 
   Map<String, Map<String, dynamic>> tumKullanicilar = {
     'Ahmet_Can': {'durum': 'Çevrimiçi', 'aktif': true, 'isDuel': false},
@@ -371,13 +480,26 @@ class _ProfilePanelState extends State<ProfilePanel>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    AppSettings.matchSavedNotifier.addListener(_reloadGecmis);
+    _reloadGecmis(); // ilk yükleme
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    AppSettings.matchSavedNotifier.removeListener(_reloadGecmis);
     super.dispose();
+  }
+
+  void _reloadGecmis() {
+    OwnershipDb.getMatchHistory().then((records) {
+      if (!mounted) return;
+      setState(() {
+        _macGecmisi = records;
+        _gecmisYukleniyor = false;
+      });
+    });
   }
 
   void _ayarlariAc() {
@@ -669,187 +791,70 @@ class _ProfilePanelState extends State<ProfilePanel>
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // ── Ayarlar / Posta satırı ──────────────────────────────────────
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 60, 24, 0),
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              _ikonButon(Icons.settings_rounded, _ayarlariAc),
+              _ikonButon(Icons.mail_outline_rounded, _postaPaneliAc,
+                  bildirimVar: true),
+            ],
+          ),
+        ),
+        // ── Avatar + Bilgi Row ──────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
               GestureDetector(
-                onTap: _ayarlariAc,
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.yuzey,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.settings_rounded,
-                    color: Colors.white,
-                    size: 26,
-                  ),
-                ),
-              ),
-              GestureDetector(
-                onTap: _postaPaneliAc,
+                onTap: _avatarSeciciAc,
                 child: Stack(
+                  alignment: Alignment.bottomRight,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      width: 72,
+                      height: 72,
                       decoration: BoxDecoration(
                         color: AppColors.yuzey,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.mail_outline_rounded,
-                        color: Colors.white,
-                        size: 26,
-                      ),
-                    ),
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: Container(
-                        width: 10,
-                        height: 10,
-                        decoration: const BoxDecoration(
-                          color: AppColors.kirmizi,
-                          shape: BoxShape.circle,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: AppColors.sari.withValues(alpha: 0.4),
+                          width: 2,
                         ),
                       ),
+                      child: Center(
+                        child: Icon(aktifAvatar, size: 44, color: AppColors.sari),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: AppColors.cyan,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.arkaPlan, width: 2),
+                      ),
+                      child: const Icon(Icons.edit_rounded,
+                          color: Colors.black, size: 12),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 14),
+              Expanded(child: _profilBilgiKolonu()),
             ],
           ),
         ),
-        GestureDetector(
-          onTap: _avatarSeciciAc,
-          child: Stack(
-            alignment: Alignment.bottomRight,
-            children: [
-              Container(
-                width: 110,
-                height: 110,
-                decoration: BoxDecoration(
-                  color: AppColors.yuzey,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.sari.withValues(alpha: 0.15),
-                      blurRadius: 20,
-                      spreadRadius: 5,
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: Icon(aktifAvatar, size: 70, color: AppColors.sari),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: AppColors.cyan,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.arkaPlan, width: 3),
-                ),
-                child: const Icon(
-                  Icons.edit_rounded,
-                  color: Colors.black,
-                  size: 16,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        const Text(
-          "LingoUstası99",
-          style: TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.w900,
-            color: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 6),
-        _LpBadge(lp: AppSettings.playerLP, renk: AppColors.sari),
         const SizedBox(height: 10),
-        FutureBuilder<FameStats>(
-          future: OwnershipEngine.getFameStats(),
-          builder: (context, snap) {
-            if (!snap.hasData) return const SizedBox.shrink();
-            final stats = snap.data!;
-            if (stats.totalOwned == 0) return const SizedBox.shrink();
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: AppColors.yuzey,
-                  borderRadius: BorderRadius.circular(15),
-                  border: Border.all(color: Colors.white10),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          stats.title,
-                          style: const TextStyle(
-                            color: AppColors.sari,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${stats.famePoints} Puan  •  ${stats.totalOwned} Kelime',
-                          style: const TextStyle(color: Colors.white38, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        if (stats.legendary > 0)
-                          _rarityDot(WordRarity.fromRank(80).color, stats.legendary),
-                        if (stats.rare > 0)
-                          _rarityDot(WordRarity.fromRank(60).color, stats.rare),
-                        if (stats.uncommon > 0)
-                          _rarityDot(WordRarity.fromRank(40).color, stats.uncommon),
-                        if (stats.common > 0)
-                          _rarityDot(WordRarity.fromRank(20).color, stats.common),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-        const SizedBox(height: 15),
+        // ── Stats chip satırı ──────────────────────────────────────────
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Row(
-            children: [
-              Expanded(
-                child: _istatistikKarti("Toplam Maç", "1,240", AppColors.cyan),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _istatistikKarti(
-                  "Kazanma Oranı",
-                  "%68",
-                  AppColors.kirmizi,
-                ),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _statsChipSatiri(),
         ),
-        const SizedBox(height: 25),
+        const SizedBox(height: 10),
+        // ── TabBar ─────────────────────────────────────────────────────
         TabBar(
           controller: _tabController,
           indicatorColor: AppColors.sari,
@@ -858,63 +863,228 @@ class _ProfilePanelState extends State<ProfilePanel>
           tabs: const [
             Tab(text: "Arkadaşlar"),
             Tab(text: "Mesajlar"),
+            Tab(text: "Geçmiş"),
           ],
         ),
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            children: [_buildArkadaslarSekmesi(), _buildMesajlarSekmesi()],
+            children: [
+              _buildArkadaslarSekmesi(),
+              _buildMesajlarSekmesi(),
+              _buildGecmisSekmesi(),
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _rarityDot(Color renk, int count) => Padding(
-    padding: const EdgeInsets.only(left: 6),
-    child: Column(
+  // ── Yeni yardımcı metodlar ─────────────────────────────────────────────────
+
+  Widget _ikonButon(IconData ikon, VoidCallback onTap,
+      {bool bildirimVar = false}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.yuzey,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(ikon, color: Colors.white, size: 22),
+          ),
+          if (bildirimVar)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: AppColors.kirmizi,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _profilBilgiKolonu() {
+    final lp        = AppSettings.playerLP;
+    final group     = LeagueRules.groupOf(lp);
+    final maxRoom   = LeagueRules.maxCreatableRoom(lp);
+    final softStart = LeagueRules.isSoftStart(lp,
+        softStartCompleted: AppSettings.softStartCompleted);
+    final nextRooms = kAllRooms
+        .where((r) => r.createThreshold > lp)
+        .toList();
+    final nextThr   = nextRooms.isNotEmpty
+        ? nextRooms.first.createThreshold : null;
+    final curThr    = maxRoom.createThreshold;
+    final progress  = nextThr != null && nextThr > curThr
+        ? (lp - curThr) / (nextThr - curThr) : 1.0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 8, height: 8,
-          decoration: BoxDecoration(color: renk, shape: BoxShape.circle),
+        const Text(
+          "LingoUstası99",
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
+          ),
         ),
-        const SizedBox(height: 2),
-        Text('$count', style: TextStyle(color: renk, fontSize: 9, fontWeight: FontWeight.bold)),
-      ],
-    ),
-  );
-
-  Widget _istatistikKarti(String baslik, String deger, Color vurguRengi) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      decoration: BoxDecoration(
-        color: AppColors.yuzey,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        children: [
+        const SizedBox(height: 5),
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 4,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: AppColors.sari.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: AppColors.sari.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.bolt_rounded, color: AppColors.sari, size: 11),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${group.name} LİGİ  •  ${maxRoom.id}  •  $lp LP',
+                    style: TextStyle(
+                      color: AppColors.sari,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (softStart)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text('SOFT',
+                    style: TextStyle(
+                        color: Colors.greenAccent,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w900)),
+              ),
+          ],
+        ),
+        if (nextThr != null) ...[
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              backgroundColor: AppColors.sari.withValues(alpha: 0.1),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                  AppColors.sari.withValues(alpha: 0.6)),
+              minHeight: 4,
+            ),
+          ),
+          const SizedBox(height: 2),
           Text(
-            baslik,
-            style: const TextStyle(
-              color: Colors.white60,
-              fontSize: 11,
+            '$lp / $nextThr LP',
+            style: TextStyle(
+              color: AppColors.sari.withValues(alpha: 0.5),
+              fontSize: 9,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            deger,
-            style: TextStyle(
-              color: vurguRengi,
-              fontSize: 26,
-              fontWeight: FontWeight.w900,
+        ],
+      ],
+    );
+  }
+
+  Widget _statsChipSatiri() {
+    final macStr = _formatlaSayi(AppSettings.toplamMac);
+    final kazanStr = AppSettings.kazanmaOraniYuzde == null
+        ? '—'
+        : '%${AppSettings.kazanmaOraniYuzde!.round()}';
+
+    return FutureBuilder<FameStats>(
+      future: OwnershipEngine.getFameStats(),
+      builder: (context, snap) {
+        final kelimeStr =
+            snap.hasData ? _formatlaSayi(snap.data!.totalOwned) : '—';
+        return Row(
+          children: [
+            Expanded(
+              child: _minikStatChip('$kelimeStr Kelime', AppColors.cyan,
+                  Icons.workspace_premium_rounded),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _minikStatChip(
+                  '$macStr Maç', AppColors.cyan, Icons.sports_esports_rounded),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _minikStatChip('$kazanStr Kazan', AppColors.kirmizi,
+                  Icons.emoji_events_rounded),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _minikStatChip(String yazi, Color renk, IconData ikon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+      decoration: BoxDecoration(
+        color: renk.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: renk.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(ikon, color: renk, size: 14),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              yazi,
+              style: TextStyle(
+                color: renk,
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// Binlik ayraçlı sayı: 1240 → "1,240", 42 → "42".
+  String _formatlaSayi(int n) {
+    final s = n.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return buf.toString();
   }
 
   Widget _buildArkadaslarSekmesi() {
@@ -1409,6 +1579,142 @@ class _ProfilePanelState extends State<ProfilePanel>
       ),
     );
   }
+
+  // ── Geçmiş sekmesi ─────────────────────────────────────────────────────────
+
+  Widget _buildGecmisSekmesi() {
+    if (_gecmisYukleniyor) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.sari),
+      );
+    }
+    if (_macGecmisi.isEmpty) {
+      return const Center(
+        child: Text(
+          'Henüz maç oynamadın.',
+          style: TextStyle(color: Colors.white38, fontSize: 14),
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+      itemCount: _macGecmisi.length,
+      itemBuilder: (_, i) => _macKarti(_macGecmisi[i]),
+    );
+  }
+
+  Widget _macKarti(MatchRecord r) {
+    final acik = _acikMaclar.contains(r.id);
+    final tarih = DateTime.fromMillisecondsSinceEpoch(r.playedAt);
+    final tarihStr =
+        '${tarih.day}.${tarih.month}.${tarih.year}  '
+        '${tarih.hour}:${tarih.minute.toString().padLeft(2, '0')}';
+    final kazandiMi = MatchScoring.isWin(r.position, r.playerCount);
+    final pozisyonRenk = kazandiMi ? Colors.greenAccent : AppColors.kirmizi;
+
+    return GestureDetector(
+      onTap: () {
+        AppSettings.selectionClick();
+        setState(() {
+          acik ? _acikMaclar.remove(r.id) : _acikMaclar.add(r.id);
+        });
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: AppColors.yuzey,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Başlık satırı ──
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Text(
+                    '#${r.position}',
+                    style: TextStyle(
+                      color: pozisyonRenk,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${r.setId} • ${r.tier} ODA',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        Text(
+                          tarihStr,
+                          style: const TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    '${r.words.length} soru',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    acik ? Icons.expand_less : Icons.expand_more,
+                    color: Colors.white38,
+                    size: 20,
+                  ),
+                ],
+              ),
+            ),
+            // ── Kelime pilleri (açıksa) ──
+            if (acik)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: r.words.map(_kelimePili).toList(),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _kelimePili(MatchWordResult w) {
+    final Color c = w.correct == null
+        ? Colors.white24               // cevapsız
+        : w.correct! ? Colors.greenAccent : AppColors.kirmizi;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: c.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        w.en,
+        style: TextStyle(
+          color: c,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
 }
 
 // ==========================================
@@ -1425,55 +1731,48 @@ class _DuelPanelState extends State<DuelPanel> {
   final Color duelRed = AppColors.kirmizi;
   String aramaMetni = "";
 
-  List<String> seciliLigler = [
-    'A100',
-    'A250',
-    'A500',
-    'A1K',
-    'B100',
-    'B250',
-    'B500',
-    'B1K',
-    'C100',
-    'C250',
-    'C500',
-    'C1K',
-  ];
+  List<String> seciliSetIdler = List<String>.from(DatabaseHelper.kAllSetIds);
+  List<String> seciliTierlar = List<String>.from(kAllRoomTiers);
   bool sadeceBosOdalar = false;
   bool sifrelileriGizle = false;
 
   List<Map<String, dynamic>> aktifOdalar = [
     {
       'isim': 'Çaylaklar Toplanın',
-      'lig': 'A100',
+      'setId': 'A',
+      'tier': '100',
       'dolu': 2,
       'kapasite': 6,
       'sifreli': false,
     },
     {
       'isim': 'İngilizce Geliştirme',
-      'lig': 'B250',
+      'setId': 'BI',
+      'tier': '250',
       'dolu': 6,
       'kapasite': 6,
       'sifreli': false,
     },
     {
       'isim': 'Zamana Karşı',
-      'lig': 'A500',
+      'setId': 'BII',
+      'tier': '500',
       'dolu': 4,
       'kapasite': 6,
       'sifreli': false,
     },
     {
       'isim': 'Hızlı Maç',
-      'lig': 'C1K',
+      'setId': 'CIII',
+      'tier': '1K',
       'dolu': 1,
       'kapasite': 2,
       'sifreli': false,
     },
     {
       'isim': 'Arkadaşlarla Özel',
-      'lig': 'B1K',
+      'setId': 'BIII',
+      'tier': '1K',
       'dolu': 2,
       'kapasite': 6,
       'sifreli': true,
@@ -1514,12 +1813,14 @@ class _DuelPanelState extends State<DuelPanel> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => OdaFiltreModal(
-        mevcutLigler: seciliLigler,
+        mevcutSetIdler: seciliSetIdler,
+        mevcutTierlar: seciliTierlar,
         mevcutSadeceBos: sadeceBosOdalar,
         mevcutSifresiz: sifrelileriGizle,
-        onFiltreUygula: (ligler, bos, sifresiz) {
+        onFiltreUygula: (setIdler, tierlar, bos, sifresiz) {
           setState(() {
-            seciliLigler = ligler;
+            seciliSetIdler = setIdler;
+            seciliTierlar = tierlar;
             sadeceBosOdalar = bos;
             sifrelileriGizle = sifresiz;
           });
@@ -1554,7 +1855,8 @@ class _DuelPanelState extends State<DuelPanel> {
       final bool isimUyar = oda['isim'].toLowerCase().contains(
         aramaMetni.toLowerCase(),
       );
-      final bool ligUyar = seciliLigler.contains(oda['lig']);
+      final bool ligUyar = seciliSetIdler.contains(oda['setId']) &&
+          seciliTierlar.contains(oda['tier']);
       final bool boslukUyar = sadeceBosOdalar
           ? (oda['dolu'] < oda['kapasite'])
           : true;
@@ -1639,7 +1941,8 @@ class _DuelPanelState extends State<DuelPanel> {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color:
-                        (seciliLigler.length < 12 ||
+                        (seciliSetIdler.length < DatabaseHelper.kAllSetIds.length ||
+                            seciliTierlar.length < kAllRoomTiers.length ||
                             sadeceBosOdalar ||
                             sifrelileriGizle)
                         ? duelRed
@@ -1647,7 +1950,8 @@ class _DuelPanelState extends State<DuelPanel> {
                     borderRadius: BorderRadius.circular(15),
                     border: Border.all(
                       color:
-                          (seciliLigler.length < 12 ||
+                          (seciliSetIdler.length < DatabaseHelper.kAllSetIds.length ||
+                              seciliTierlar.length < kAllRoomTiers.length ||
                               sadeceBosOdalar ||
                               sifrelileriGizle)
                           ? duelRed
@@ -1657,7 +1961,8 @@ class _DuelPanelState extends State<DuelPanel> {
                   child: Icon(
                     Icons.tune_rounded,
                     color:
-                        (seciliLigler.length < 12 ||
+                        (seciliSetIdler.length < DatabaseHelper.kAllSetIds.length ||
+                            seciliTierlar.length < kAllRoomTiers.length ||
                             sadeceBosOdalar ||
                             sifrelileriGizle)
                         ? Colors.black
@@ -1734,9 +2039,13 @@ class _DuelPanelState extends State<DuelPanel> {
 
   Widget _odaKarti(Map<String, dynamic> oda) {
     final bool doluMu = oda['dolu'] >= oda['kapasite'];
-    final RoomDefinition? room = roomById(oda['lig'] as String);
+    final RoomDefinition? room = roomForSetAndTier(
+      oda['setId'] as String,
+      oda['tier'] as String,
+    );
     final int playerLP = AppSettings.playerLP;
-    final bool girebilir = room != null && LeagueRules.canJoin(playerLP, room);
+    final bool girebilir =
+        room != null && LeagueRules.canJoin(playerLP, room);
     final bool aboveMax = girebilir &&
         room.levelIndex > LeagueRules.maxCreatableRoom(playerLP).levelIndex;
 
@@ -1831,7 +2140,7 @@ class _DuelPanelState extends State<DuelPanel> {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            "${oda['lig']} LİGİ",
+                            "${oda['setId']} • ${oda['tier']} ODA",
                             style: TextStyle(
                               color: duelRed,
                               fontSize: 10,
@@ -2091,14 +2400,16 @@ class _SifreDialogState extends State<_SifreDialog> {
 // --- MODAL EKRANLARI ---
 // ==========================================
 class OdaFiltreModal extends StatefulWidget {
-  final List<String> mevcutLigler;
+  final List<String> mevcutSetIdler;
+  final List<String> mevcutTierlar;
   final bool mevcutSadeceBos;
   final bool mevcutSifresiz;
-  final Function(List<String>, bool, bool) onFiltreUygula;
+  final Function(List<String>, List<String>, bool, bool) onFiltreUygula;
 
   const OdaFiltreModal({
     super.key,
-    required this.mevcutLigler,
+    required this.mevcutSetIdler,
+    required this.mevcutTierlar,
     required this.mevcutSadeceBos,
     required this.mevcutSifresiz,
     required this.onFiltreUygula,
@@ -2109,16 +2420,85 @@ class OdaFiltreModal extends StatefulWidget {
 }
 
 class _OdaFiltreModalState extends State<OdaFiltreModal> {
-  List<String> seciliLigler = [];
+  List<String> seciliSetIdler = [];
+  List<String> seciliTierlar = [];
   bool sadeceBosOdalar = false;
   bool sifrelileriGizle = false;
 
   @override
   void initState() {
     super.initState();
-    seciliLigler = List.from(widget.mevcutLigler);
+    seciliSetIdler = List.from(widget.mevcutSetIdler);
+    seciliTierlar = List.from(widget.mevcutTierlar);
     sadeceBosOdalar = widget.mevcutSadeceBos;
     sifrelileriGizle = widget.mevcutSifresiz;
+  }
+
+  Widget _toggleButon({
+    required String etiket,
+    required bool seciliMi,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        height: 44,
+        decoration: BoxDecoration(
+          color: seciliMi ? AppColors.kirmizi : AppColors.butonArka,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: seciliMi ? AppColors.kirmizi : Colors.white12,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            etiket,
+            style: TextStyle(
+              color: seciliMi ? Colors.black : Colors.white60,
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _filtreButonu(String setId) {
+    final bool seciliMi = seciliSetIdler.contains(setId);
+    return _toggleButon(
+      etiket: setId,
+      seciliMi: seciliMi,
+      onTap: () {
+        AppSettings.lightImpact();
+        setState(() {
+          if (seciliMi) {
+            seciliSetIdler.remove(setId);
+          } else {
+            seciliSetIdler.add(setId);
+          }
+        });
+      },
+    );
+  }
+
+  Widget _tierFiltreButonu(String tier) {
+    final bool seciliMi = seciliTierlar.contains(tier);
+    return _toggleButon(
+      etiket: tier,
+      seciliMi: seciliMi,
+      onTap: () {
+        AppSettings.lightImpact();
+        setState(() {
+          if (seciliMi) {
+            seciliTierlar.remove(tier);
+          } else {
+            seciliTierlar.add(tier);
+          }
+        });
+      },
+    );
   }
 
   @override
@@ -2157,7 +2537,7 @@ class _OdaFiltreModalState extends State<OdaFiltreModal> {
           ),
           const SizedBox(height: 25),
           const Text(
-            "LİG SEVİYESİ",
+            "KELİME SETİ",
             style: TextStyle(
               color: Colors.white24,
               fontSize: 10,
@@ -2166,64 +2546,43 @@ class _OdaFiltreModalState extends State<OdaFiltreModal> {
             ),
           ),
           const SizedBox(height: 12),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 4,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 2.0,
-            children:
-                [
-                  'A100',
-                  'A250',
-                  'A500',
-                  'A1K',
-                  'B100',
-                  'B250',
-                  'B500',
-                  'B1K',
-                  'C100',
-                  'C250',
-                  'C500',
-                  'C1K',
-                ].map((lig) {
-                  final bool seciliMi = seciliLigler.contains(lig);
-                  return GestureDetector(
-                    onTap: () {
-                      AppSettings.lightImpact();
-                      setState(() {
-                        if (seciliMi) {
-                          seciliLigler.remove(lig);
-                        } else {
-                          seciliLigler.add(lig);
-                        }
-                      });
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      decoration: BoxDecoration(
-                        color: seciliMi
-                            ? AppColors.kirmizi
-                            : AppColors.butonArka,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: seciliMi ? AppColors.kirmizi : Colors.white12,
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          lig,
-                          style: TextStyle(
-                            color: seciliMi ? Colors.black : Colors.white60,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
+          for (final lig in LeagueGroup.values) ...[
+            if (lig != LeagueGroup.A) const SizedBox(height: 10),
+            Row(
+              children: [
+                for (final set in wordSetsByLeague(lig))
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _filtreButonu(set.id),
                     ),
-                  );
-                }).toList(),
+                  ),
+                if (lig == LeagueGroup.A)
+                  const Expanded(flex: 2, child: SizedBox.shrink()),
+              ],
+            ),
+          ],
+          const SizedBox(height: 18),
+          const Text(
+            "ODA KADEMESİ",
+            style: TextStyle(
+              color: Colors.white24,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              for (final tier in kAllRoomTiers)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _tierFiltreButonu(tier),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 25),
           Container(
@@ -2276,7 +2635,8 @@ class _OdaFiltreModalState extends State<OdaFiltreModal> {
             onTap: () {
               AppSettings.heavyImpact();
               widget.onFiltreUygula(
-                seciliLigler,
+                seciliSetIdler,
+                seciliTierlar,
                 sadeceBosOdalar,
                 sifrelileriGizle,
               );
@@ -2322,13 +2682,139 @@ class _OdaKurModalState extends State<OdaKurModal> {
   final TextEditingController _sifreController = TextEditingController();
   double oyuncuSayisi = 2;
   bool sifreliMi = false;
-  String secilenLig = 'A100';
+  String secilenSetId = 'A';
+  String secilenTier = '100';
 
   @override
   void dispose() {
     _isimController.dispose();
     _sifreController.dispose();
     super.dispose();
+  }
+
+  /// Ortak button şablonu (set ve tier butonları aynı görsel).
+  Widget _gateliButon({
+    required String etiket,
+    required bool seciliMi,
+    required bool acabilir,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        height: 44,
+        decoration: BoxDecoration(
+          color: seciliMi
+              ? AppColors.kirmizi
+              : acabilir
+                  ? AppColors.butonArka
+                  : AppColors.butonArka.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: seciliMi
+                ? AppColors.kirmizi
+                : acabilir
+                    ? Colors.white12
+                    : Colors.white12.withValues(alpha: 0.3),
+          ),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Text(
+              etiket,
+              style: TextStyle(
+                color: seciliMi
+                    ? Colors.black
+                    : acabilir
+                        ? Colors.white60
+                        : Colors.white24,
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+            if (!acabilir)
+              const Positioned(
+                top: 4,
+                right: 6,
+                child: Icon(
+                  Icons.lock_rounded,
+                  size: 8,
+                  color: Colors.white24,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _setButonu(WordSetDefinition set) {
+    // Set'in min tier'ı (lig giriş LP'si): A100 / B100 / C100
+    final RoomDefinition minRoom = roomForSetAndTier(set.id, '100')!;
+    final bool acabilir = LeagueRules.canCreate(widget.playerLP, minRoom);
+    return _gateliButon(
+      etiket: set.id,
+      seciliMi: secilenSetId == set.id,
+      acabilir: acabilir,
+      onTap: () {
+        if (!acabilir) {
+          AppSettings.selectionClick();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${set.league.name} ligine giriş için '
+                '${minRoom.createThreshold} LP gerekiyor. '
+                'Şu anki LP: ${widget.playerLP}',
+              ),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+          return;
+        }
+        AppSettings.lightImpact();
+        setState(() {
+          secilenSetId = set.id;
+          // Seçilen yeni setin ligine göre tier'lar yeniden gate'lenir;
+          // mevcut tier seçimi geçersizleşmişse 100'e düş.
+          final tierRoom = roomForSetAndTier(set.id, secilenTier);
+          if (tierRoom == null ||
+              !LeagueRules.canCreate(widget.playerLP, tierRoom)) {
+            secilenTier = '100';
+          }
+        });
+      },
+    );
+  }
+
+  Widget _tierButonu(String tier) {
+    final RoomDefinition? room = roomForSetAndTier(secilenSetId, tier);
+    final bool acabilir =
+        room != null && LeagueRules.canCreate(widget.playerLP, room);
+    return _gateliButon(
+      etiket: tier,
+      seciliMi: secilenTier == tier,
+      acabilir: acabilir,
+      onTap: () {
+        if (!acabilir) {
+          AppSettings.selectionClick();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '$secilenSetId • $tier odası için '
+                '${room?.createThreshold ?? 0} LP gerekiyor. '
+                'Şu anki LP: ${widget.playerLP}',
+              ),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+          return;
+        }
+        AppSettings.lightImpact();
+        setState(() => secilenTier = tier);
+      },
+    );
   }
 
   @override
@@ -2435,7 +2921,7 @@ class _OdaKurModalState extends State<OdaKurModal> {
               ),
               const SizedBox(height: 15),
               const Text(
-                "LİG SEVİYESİ",
+                "KELİME SETİ",
                 style: TextStyle(
                   color: Colors.white24,
                   fontSize: 10,
@@ -2444,83 +2930,44 @@ class _OdaKurModalState extends State<OdaKurModal> {
                 ),
               ),
               const SizedBox(height: 8),
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 4,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 2.0,
-                children:
-                    kAllRooms.map((room) {
-                      final lig = room.id;
-                      final bool seciliMi = secilenLig == lig;
-                      final bool acabilir = LeagueRules.canCreate(widget.playerLP, room);
-                      return GestureDetector(
-                        onTap: () {
-                          if (!acabilir) {
-                            AppSettings.selectionClick();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  '$lig için ${room.createThreshold} LP gerekiyor. '
-                                  'Şu anki LP: ${widget.playerLP}',
-                                ),
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
-                            return;
-                          }
-                          AppSettings.lightImpact();
-                          setState(() => secilenLig = lig);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          decoration: BoxDecoration(
-                            color: seciliMi
-                                ? AppColors.kirmizi
-                                : acabilir
-                                    ? AppColors.butonArka
-                                    : AppColors.butonArka.withValues(alpha: 0.3),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: seciliMi
-                                  ? AppColors.kirmizi
-                                  : acabilir
-                                      ? Colors.white12
-                                      : Colors.white12.withValues(alpha: 0.3),
-                            ),
-                          ),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Text(
-                                lig,
-                                style: TextStyle(
-                                  color: seciliMi
-                                      ? Colors.black
-                                      : acabilir
-                                          ? Colors.white60
-                                          : Colors.white24,
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 13,
-                                ),
-                              ),
-                              if (!acabilir)
-                                const Positioned(
-                                  top: 4,
-                                  right: 6,
-                                  child: Icon(
-                                    Icons.lock_rounded,
-                                    size: 8,
-                                    color: Colors.white24,
-                                  ),
-                                ),
-                            ],
-                          ),
+              for (final lig in LeagueGroup.values) ...[
+                if (lig != LeagueGroup.A) const SizedBox(height: 10),
+                Row(
+                  children: [
+                    for (final set in wordSetsByLeague(lig))
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: _setButonu(set),
                         ),
-                      );
-                    }).toList(),
+                      ),
+                    // A satırı tek butonlu — sağ tarafı boş doldur
+                    if (lig == LeagueGroup.A)
+                      const Expanded(flex: 2, child: SizedBox.shrink()),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 18),
+              const Text(
+                "ODA KADEMESİ",
+                style: TextStyle(
+                  color: Colors.white24,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  for (final tier in kAllRoomTiers)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: _tierButonu(tier),
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(height: 25),
               Container(
@@ -2583,7 +3030,8 @@ class _OdaKurModalState extends State<OdaKurModal> {
                   if (odaAdi.isEmpty) odaAdi = "Yeni Oda";
                   widget.onOdaEkle({
                     'isim': odaAdi,
-                    'lig': secilenLig,
+                    'setId': secilenSetId,
+                    'tier': secilenTier,
                     'dolu': 1,
                     'kapasite': oyuncuSayisi.toInt(),
                     'sifreli': sifreliMi,
@@ -3672,7 +4120,7 @@ class KelimeKarti extends StatefulWidget {
   final VoidCallback onNewWord;
   final Color temaRengi;
   final Color golgeRengi;
-  final String level; // 'A' | 'B' | 'C'
+  final String setId; // 'A' | 'BI' | 'BII' | 'BIII' | 'CI' | 'CII' | 'CIII'
 
   const KelimeKarti({
     super.key,
@@ -3680,7 +4128,7 @@ class KelimeKarti extends StatefulWidget {
     required this.onNewWord,
     required this.temaRengi,
     required this.golgeRengi,
-    required this.level,
+    required this.setId,
   });
 
   @override
@@ -3690,48 +4138,11 @@ class KelimeKarti extends StatefulWidget {
 class _KelimeKartiState extends State<KelimeKarti> {
   bool isFlipped = false;
   bool isPressed = false;
-  String? _owner; // null = henüz yüklenmedi / sahipsiz
-
-  @override
-  void initState() {
-    super.initState();
-    _loadOwner();
-  }
-
-  Future<void> _loadOwner() async {
-    final o = await OwnershipEngine.getOwner(
-      widget.level, widget.data['rank'] as int,
-    );
-    if (mounted) setState(() => _owner = o);
-  }
-
-  Future<void> _tryClaimAndNotify() async {
-    final rank = widget.data['rank'] as int;
-    final result = await OwnershipEngine.tryClaimFlashcard(
-      level: widget.level, rank: rank,
-    );
-    if (!mounted) return;
-    if (result.claimed) {
-      setState(() => _owner = 'Sen');
-      final rarity = result.rarity;
-      final isSteal = result.isSteal;
-      final msg = isSteal
-          ? '${widget.data['en']} çalındı! (${rarity.label})'
-          : '${widget.data['en']} sahiplenildi! (${rarity.label})';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: rarity.color,
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-      ));
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
-    final rank    = widget.data['rank'] as int;
-    final rarity  = WordRarity.fromRank(rank);
-    final ownedByMe = _owner == 'Sen';
+    final rank   = widget.data['rank'] as int;
+    final rarity = WordRarityMath.rarityForIndex(setId: widget.setId, index: rank);
 
     return GestureDetector(
       onTapDown: (_) => setState(() => isPressed = true),
@@ -3743,9 +4154,7 @@ class _KelimeKartiState extends State<KelimeKarti> {
       },
       onLongPress: () {
         AppSettings.heavyImpact();
-        final opening = !isFlipped;
         setState(() => isFlipped = !isFlipped);
-        if (opening) _tryClaimAndNotify();
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
@@ -3764,14 +4173,12 @@ class _KelimeKartiState extends State<KelimeKarti> {
                   ),
                 ],
         ),
-        child: isFlipped
-            ? _buildBack(ownedByMe, rarity)
-            : _buildFront(ownedByMe, rarity),
+        child: isFlipped ? _buildBack(rarity) : _buildFront(rarity),
       ),
     );
   }
 
-  Widget _rarityChip(RarityLevel rarity, {bool dark = false}) => Container(
+  Widget _rarityChip(WordRarity rarity, {bool dark = false}) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
     decoration: BoxDecoration(
       color: rarity.color.withValues(alpha: dark ? 0.18 : 0.12),
@@ -3792,7 +4199,7 @@ class _KelimeKartiState extends State<KelimeKarti> {
     ),
   );
 
-  Widget _buildFront(bool ownedByMe, RarityLevel rarity) => Stack(
+  Widget _buildFront(WordRarity rarity) => Stack(
     children: [
       Center(
         child: Text(
@@ -3805,15 +4212,10 @@ class _KelimeKartiState extends State<KelimeKarti> {
         ),
       ),
       Positioned(top: 0, right: 0, child: _rarityChip(rarity)),
-      if (ownedByMe)
-        const Positioned(
-          top: 0, left: 0,
-          child: Icon(Icons.star_rounded, color: AppColors.sari, size: 18),
-        ),
     ],
   );
 
-  Widget _buildBack(bool ownedByMe, RarityLevel rarity) => Stack(
+  Widget _buildBack(WordRarity rarity) => Stack(
     children: [
       Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -3849,11 +4251,6 @@ class _KelimeKartiState extends State<KelimeKarti> {
         ],
       ),
       Positioned(top: 0, right: 0, child: _rarityChip(rarity, dark: true)),
-      if (ownedByMe)
-        const Positioned(
-          top: 0, left: 0,
-          child: Icon(Icons.star_rounded, color: Colors.black54, size: 18),
-        ),
     ],
   );
 }
