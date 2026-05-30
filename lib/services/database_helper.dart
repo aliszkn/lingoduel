@@ -1,8 +1,17 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 import '../models/word_entry.dart';
+
+/// Bu satır sayısından fazlası → dönüşüm arka isolate'te (compute).
+/// Daha azı inline kalır (isolate spawn maliyeti faydadan pahalı olurdu).
+const int _kIsolateEsigi = 400;
+
+/// Isolate'te çalışacak saf dönüşüm (top-level olmalı — compute gereği).
+List<WordEntry> _rowsToWords(List<Map<String, Object?>> rows) =>
+    rows.map(WordEntry.fromRow).toList();
 
 /// 14.000 kelimelik önceden doldurulmuş (pre-populated) SQLite veritabanını yönetir.
 ///
@@ -109,6 +118,15 @@ class DatabaseHelper {
 
   // ── Sorgular ───────────────────────────────────────────────────────────────
 
+  /// Satır listesini WordEntry'lere çevirir; eşik üstündeyse arka isolate'te.
+  static Future<List<WordEntry>> _mapWords(
+      List<Map<String, Object?>> rows) async {
+    if (rows.length > _kIsolateEsigi) {
+      return compute(_rowsToWords, rows); // arka thread — UI bloke olmaz
+    }
+    return _rowsToWords(rows); // küçük → inline (spawn maliyeti yok)
+  }
+
   /// Verilen setin doldurulmuş kelimelerini (rank artan) döner.
   /// LingoCards filter bar + LingoDuel oda kurulumu bunu kullanır.
   ///
@@ -123,7 +141,7 @@ class DatabaseHelper {
       whereArgs: [setId],
       orderBy: 'rank ASC',
     );
-    return rows.map(WordEntry.fromRow).toList();
+    return _mapWords(rows);
   }
 
   /// Setin ilk [rankCap] kelimesini (rank < rankCap, rank ASC) döner.
@@ -138,7 +156,7 @@ class DatabaseHelper {
       whereArgs: [setId, rankCap],
       orderBy: 'rank ASC',
     );
-    return rows.map(WordEntry.fromRow).toList();
+    return _mapWords(rows);
   }
 
   /// `wordId` listesine karşılık gelen kelimeleri döner (wordId → WordEntry).
@@ -199,7 +217,7 @@ class DatabaseHelper {
       orderBy: 'rank ASC',
       limit: limit,
     );
-    return rows.map(WordEntry.fromRow).toList();
+    return _mapWords(rows);
   }
 
   /// Eski API geçişi için: bir seviyenin (A/B/C) TÜM dolu kelimelerini birleştirir.
@@ -213,7 +231,7 @@ class DatabaseHelper {
       whereArgs: ['$level%'],
       orderBy: 'set_id ASC, rank ASC',
     );
-    return rows.map(WordEntry.fromRow).toList();
+    return _mapWords(rows);
   }
 
   /// Geliştirme: yerel kopyayı silip yeniden kopyalanmaya zorlar.

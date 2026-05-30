@@ -189,6 +189,22 @@ class RarityIcon extends StatelessWidget {
   final WordRarity rarity;
   final double size;
 
+  /// 6 enderlik SVG'sini flutter_svg cache'ine önceden yükler (uygulama
+  /// açılışında çağrılır). İlk gösterimde "pop"/gecikme olmaz; ikonlar
+  /// anında çizilir. context=null → rootBundle + default theme, render
+  /// anındaki cache key'iyle birebir eşleşir.
+  static Future<void> precacheAll() async {
+    try {
+      await Future.wait(
+        WordRarity.values.map(
+          (r) => SvgAssetLoader(r.assetPath).loadBytes(null),
+        ),
+      );
+    } catch (_) {
+      // Precache başarısız olsa bile SvgPicture.asset render anında yükler.
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SvgPicture.asset(

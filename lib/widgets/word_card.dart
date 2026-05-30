@@ -34,38 +34,55 @@ class _KelimeKartiState extends State<KelimeKarti> {
     final rank   = widget.data['rank'] as int;
     final rarity = WordRarityMath.rarityForIndex(setId: widget.setId, index: rank);
 
-    return GestureDetector(
-      onTapDown:    (_) => setState(() => isPressed = true),
-      onTapUp:      (_) => setState(() => isPressed = false),
-      onTapCancel:  ()  => setState(() => isPressed = false),
-      onTap: () {
-        widget.onNewWord();
-        setState(() => isFlipped = false);
-      },
-      onLongPress: () {
-        AppSettings.heavyImpact();
-        setState(() => isFlipped = !isFlipped);
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 100),
-        margin: EdgeInsets.only(bottom: 16, top: isPressed ? 6 : 0),
-        padding: const EdgeInsets.all(20),
-        constraints: BoxConstraints(minHeight: isFlipped ? 160.0 : 90.0),
-        decoration: BoxDecoration(
-          color: isFlipped ? widget.temaRengi : AppColors.yuzey,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: isPressed
-              ? []
-              : [
-                  BoxShadow(
-                    color: isFlipped
-                        ? widget.golgeRengi
-                        : AppColors.kartGolge,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+    return RepaintBoundary(
+      child: GestureDetector(
+        onTapDown:    (_) => setState(() => isPressed = true),
+        onTapUp:      (_) => setState(() => isPressed = false),
+        onTapCancel:  ()  => setState(() => isPressed = false),
+        onTap: () {
+          widget.onNewWord();
+          setState(() => isFlipped = false);
+        },
+        onLongPress: () {
+          AppSettings.heavyImpact();
+          setState(() => isFlipped = !isFlipped);
+        },
+        // Basma efekti: margin (layout) yerine scale (paint).
+        child: AnimatedScale(
+          scale: isPressed ? 0.97 : 1.0,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOut,
+          // Flip yükseklik geçişi: AnimatedSize (relayout kendi alt-ağacında).
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isFlipped ? widget.temaRengi : AppColors.yuzey,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: isPressed
+                    ? []
+                    : [
+                        BoxShadow(
+                          color: isFlipped
+                              ? widget.golgeRengi
+                              : AppColors.kartGolge,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+              ),
+              // Statik minHeight floor (animasyonlu değil; geçişi AnimatedSize yapar).
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: isFlipped ? 120.0 : 50.0),
+                child: isFlipped ? _buildBack(rarity) : _buildFront(rarity),
+              ),
+            ),
+          ),
         ),
-        child: isFlipped ? _buildBack(rarity) : _buildFront(rarity),
       ),
     );
   }

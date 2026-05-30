@@ -43,3 +43,14 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Node (kelime zenginleştirme aracı — tool/)
+tool/node_modules/
+
+# DevTools geçici çıktıları
+dart_devtools_*.json
+devtools_options.yaml
+
+# Kelime zenginleştirme çalışma dosyaları (yeniden üretilebilir, gerekirse)
+tool/database.json
+tool/enrich_progress.json

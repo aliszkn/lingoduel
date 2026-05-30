@@ -10,6 +10,7 @@ import '../game/word_sets.dart';
 import '../game/ownership_engine.dart';
 import '../models/word_entry.dart';
 import '../services/app_settings.dart';
+import '../services/nakama_service.dart';
 import '../services/database_helper.dart';
 import '../services/ownership_db.dart';
 import 'game_screen.dart';
@@ -138,6 +139,11 @@ class _CardsPanelState extends State<CardsPanel> {
   /// Ekranda gösterilen N rastgele kelime (setId/tier/enderlik değişince yenilenir).
   List<Map<String, dynamic>> ekrandakiKelimeler = [];
 
+  /// Filtreli+karışık havuz — set/tier/rarity değişiminde 1 kez hesaplanır.
+  /// Kart tıklamasında yeniden shuffle YAPILMAZ; cursor ile ilerlenir.
+  List<Map<String, dynamic>> _filtreliHavuz = [];
+  int _kartCursor = 0;
+
   @override
   void initState() {
     super.initState();
@@ -162,27 +168,31 @@ class _CardsPanelState extends State<CardsPanel> {
     kelimeleriGetir();
   }
 
-  /// Aktif set + enderlik filtresine göre kelime havuzu (Map listesi).
-  List<Map<String, dynamic>> _aktifHavuz() => _setKelimeleri
-      .where((w) => w.rarity == secilenRarity)
-      .map((w) => w.toMap())
-      .toList()
-    ..shuffle();
-
   void kelimeleriGetir() {
-    final havuz = _aktifHavuz();
-    final miktar = havuz.length < _kKartAdedi ? havuz.length : _kKartAdedi;
+    // Filter + map + shuffle: yalnızca set/tier/rarity değişiminde 1 kez.
+    _filtreliHavuz = _setKelimeleri
+        .where((w) => w.rarity == secilenRarity)
+        .map((w) => w.toMap())
+        .toList()
+      ..shuffle();
+    final n = _filtreliHavuz.length < _kKartAdedi
+        ? _filtreliHavuz.length
+        : _kKartAdedi;
     setState(() {
-      ekrandakiKelimeler = havuz.isEmpty ? [] : havuz.sublist(0, miktar);
+      ekrandakiKelimeler =
+          _filtreliHavuz.isEmpty ? [] : _filtreliHavuz.sublist(0, n);
+      _kartCursor = n;
     });
   }
 
   void tekKelimeDegistir(int index) {
     AppSettings.selectionClick();
-    final havuz = _aktifHavuz();
-    if (havuz.isEmpty) return;
+    if (_filtreliHavuz.isEmpty) return;
+    // Reshuffle YOK — cursor ile sıradaki kelimeye geç (O(1)).
     setState(() {
-      ekrandakiKelimeler[index] = havuz.first;
+      ekrandakiKelimeler[index] =
+          _filtreliHavuz[_kartCursor % _filtreliHavuz.length];
+      _kartCursor++;
     });
   }
 
@@ -578,6 +588,50 @@ class _ProfilePanelState extends State<ProfilePanel>
     );
   }
 
+  Future<void> _isimDuzenle() async {
+    final ctrl = TextEditingController(text: AppSettings.kullaniciAdi);
+    final sonuc = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.yuzey,
+        title: const Text('Kullanıcı Adı',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 20,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Adını gir…',
+            hintStyle: const TextStyle(color: Colors.white38),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(
+                    color: AppColors.sari.withValues(alpha: 0.4))),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: AppColors.sari)),
+            counterStyle: const TextStyle(color: Colors.white38),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('İptal',
+                  style: TextStyle(color: Colors.white38))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: Text('Kaydet',
+                  style: TextStyle(color: AppColors.sari))),
+        ],
+      ),
+    );
+    if (sonuc != null && sonuc.trim().isNotEmpty) {
+      await AppSettings.setKullaniciAdi(sonuc);
+      NakamaService.instance.profilKaydet();
+      setState(() {});
+    }
+  }
+
   void _avatarSeciciAc() {
     AppSettings.mediumImpact();
     showModalBottomSheet(
@@ -970,12 +1024,26 @@ class _ProfilePanelState extends State<ProfilePanel>
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Text(
-          "LingoUstası99",
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w900,
-            color: Colors.white,
+        GestureDetector(
+          onTap: _isimDuzenle,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  AppSettings.kullaniciAdi,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 5),
+              const Icon(Icons.edit_rounded, size: 13, color: Colors.white38),
+            ],
           ),
         ),
         const SizedBox(height: 5),
@@ -2075,71 +2143,65 @@ class _DuelPanelState extends State<DuelPanel> {
   bool sadeceBosOdalar = false;
   bool sifrelileriGizle = false;
 
-  List<Map<String, dynamic>> aktifOdalar = [
-    {
-      'isim': 'Çaylaklar Toplanın',
-      'setId': 'A',
-      'tier': '100',
-      'dolu': 2,
-      'kapasite': 6,
-      'sifreli': false,
-    },
-    {
-      'isim': 'İngilizce Geliştirme',
-      'setId': 'BI',
-      'tier': '250',
-      'dolu': 6,
-      'kapasite': 6,
-      'sifreli': false,
-    },
-    {
-      'isim': 'Zamana Karşı',
-      'setId': 'BII',
-      'tier': '500',
-      'dolu': 4,
-      'kapasite': 6,
-      'sifreli': false,
-    },
-    {
-      'isim': 'Hızlı Maç',
-      'setId': 'CIII',
-      'tier': '1K',
-      'dolu': 1,
-      'kapasite': 2,
-      'sifreli': false,
-    },
-    {
-      'isim': 'Arkadaşlarla Özel',
-      'setId': 'BIII',
-      'tier': '1K',
-      'dolu': 2,
-      'kapasite': 6,
-      'sifreli': true,
-      'sifre': '1234',
-    },
-  ];
+  List<Map<String, dynamic>> aktifOdalar = [];
+  bool _yukleniyor = false;
 
-  void _odaKurPaneliAc() {
+  @override
+  void initState() {
+    super.initState();
+    _soketBaglaVeOdaYukle();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  Future<void> _soketBaglaVeOdaYukle() async {
+    if (!NakamaService.instance.girisYapildi) return;
+    await NakamaService.instance.soketBaglan();
+    await _odalariYukle();
+  }
+
+  Future<void> _odalariYukle() async {
+    // Eşzamanlılık guard: önceki istek bitmediyse yeni RPC atma (Prensip 3).
+    if (_yukleniyor) return;
+    if (!mounted || !NakamaService.instance.girisYapildi) return;
+    setState(() => _yukleniyor = true);
+    try {
+      final odalar = await NakamaService.instance.aktifOdalariGetir();
+      if (!mounted) return;
+      setState(() { aktifOdalar = odalar; _yukleniyor = false; });
+    } catch (_) {
+      if (mounted) setState(() => _yukleniyor = false);
+    }
+  }
+
+  Future<void> _odaKurPaneliAc() async {
     AppSettings.heavyImpact();
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (modalContext) => OdaKurModal(
         playerLP: AppSettings.playerLP,
-        onOdaEkle: (yeniOda) {
-          setState(() {
-            aktifOdalar.insert(0, yeniOda);
-          });
-          Future.delayed(const Duration(milliseconds: 200), () {
-            if (!mounted) return;
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => OyunOdasiEkrani(odaBilgisi: yeniOda),
-              ),
-            ).then((_) => setState(() {})); // LP değişince DuelPanel yenilenir
-          });
+        onOdaEkle: (yeniOda) async {
+          Navigator.pop(modalContext);
+          // Sunucuda oda oluştur
+          final serverOda = await NakamaService.instance.odaOlustur(
+            isim:     yeniOda['isim'] as String,
+            setId:    yeniOda['setId'] as String,
+            tier:     yeniOda['tier'] as String,
+            kapasite: yeniOda['kapasite'] as int,
+          );
+          final oda = serverOda ?? yeniOda; // sunucu yoksa local fallback
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => OyunOdasiEkrani(odaBilgisi: oda),
+            ),
+          ).then((_) { _odalariYukle(); });
         },
       ),
     );
@@ -2178,12 +2240,20 @@ class _DuelPanelState extends State<DuelPanel> {
         duelRed: duelRed,
       ),
     );
-    if (basarili == true && mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => OyunOdasiEkrani(odaBilgisi: oda)),
-      );
+    if (basarili == true && mounted) _odayaGir(oda);
+  }
+
+  Future<void> _odayaGir(Map<String, dynamic> oda) async {
+    final matchId = oda['matchId'] as String?;
+    if (matchId != null && matchId.isNotEmpty) {
+      // Sunucuda matchId var — gerçek çok oyunculu lobi
+      await NakamaService.instance.macaKatil(matchId);
     }
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => OyunOdasiEkrani(odaBilgisi: oda)),
+    ).then((_) { _odalariYukle(); });
   }
 
   @override
@@ -2312,24 +2382,42 @@ class _DuelPanelState extends State<DuelPanel> {
             ],
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(24, 10, 24, 6),
-          child: Text(
-            'AKTİF ODALAR',
-            style: TextStyle(
-              color: Colors.white24,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.5,
-            ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 10, 24, 6),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'AKTİF ODALAR',
+                style: TextStyle(
+                  color: Colors.white24,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              GestureDetector(
+                onTap: _odalariYukle,
+                child: Icon(
+                  Icons.refresh_rounded,
+                  color: _yukleniyor ? duelRed : Colors.white24,
+                  size: 18,
+                ),
+              ),
+            ],
           ),
         ),
         Expanded(
-          child: gosterilecekOdalar.isEmpty
-              ? const Center(
+          child: _yukleniyor
+              ? Center(child: CircularProgressIndicator(color: duelRed, strokeWidth: 2))
+              : gosterilecekOdalar.isEmpty
+              ? Center(
                   child: Text(
-                    "Aradığınız kriterde oda bulunamadı.",
-                    style: TextStyle(color: Colors.white38),
+                    aktifOdalar.isEmpty
+                        ? "Henüz oda yok.\nİlk odayı sen kur!"
+                        : "Aradığın kriterde oda bulunamadı.",
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white38),
                   ),
                 )
               : ListView.builder(
@@ -2412,12 +2500,7 @@ class _DuelPanelState extends State<DuelPanel> {
           _sifreSor(oda);
           return;
         }
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => OyunOdasiEkrani(odaBilgisi: oda),
-          ),
-        ).then((_) => setState(() {})); // LP güncellenince DuelPanel yenilenir
+        _odayaGir(oda);
       },
       child: Opacity(
         opacity: girebilir ? 1.0 : 0.45,

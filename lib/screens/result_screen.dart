@@ -7,6 +7,7 @@ import '../game/word_rarity.dart';
 import '../game/word_sets.dart';
 import '../models/word_entry.dart';
 import '../services/app_settings.dart';
+import '../services/nakama_service.dart';
 
 class ResultScreen extends StatefulWidget {
   final List<Map<String, dynamic>> players;
@@ -67,6 +68,7 @@ class _ResultScreenState extends State<ResultScreen> {
 
     _lpAfter = (_lpBefore + _lpChange).clamp(0, 99999);
     AppSettings.setPlayerLP(_lpAfter); // kalıcı yaz (async, UI etkilemez)
+    NakamaService.instance.profilKaydet(); // sunucuya sync (fire-and-forget)
 
     // Maç sonucu sesi
     if (kazandim) {

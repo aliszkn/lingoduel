@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:nakama/nakama.dart' show MatchData, MatchPresenceEvent;
 import '../core/app_colors.dart';
 import '../game/match_scoring.dart';
 import '../game/ownership_engine.dart';
 import '../services/app_settings.dart';
 import '../services/database_helper.dart';
+import '../services/nakama_service.dart';
 import '../services/ownership_db.dart';
 import '../models/question_model.dart';
 import '../models/word_entry.dart';
@@ -31,6 +34,32 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
   List<Map<String, dynamic>> oyuncular = [];
   // Banlanan oyuncu isimleri — yeni bot eklerken bu isim kullanılmaz
   final Set<String> _banliIsimler = {};
+
+  // ── Faz 2: Gerçek çok oyunculu lobi ───────────────────────────────────────
+  /// true = Nakama matchId ile gerçek lobi; false = eski bot modu
+  late final bool _gercekCoklu;
+  /// Nakama match ID (gerçek çok oyunculu modda dolu)
+  late final String? _matchId;
+  /// Nakama room ID (Lua Storage'daki oda kaydı)
+  late final String? _roomId;
+  /// Gerçek oyuncular: userId → isim
+  final Map<String, String> _gercekOyuncular = {};
+  StreamSubscription<MatchPresenceEvent>? _presenceSub;
+  StreamSubscription<MatchData>?          _dataSub;
+
+  // Rate-limit & debounce guard'ları (Prensip 3)
+  /// Oyun başlatma idempotency: true olunca ikinci çağrı yok sayılır.
+  bool _oyunBaslatildi = false;
+  /// "Hazır ol" için son soket gönderim zamanı — 400ms throttle.
+  DateTime? _sonHazirGonderim;
+
+  // ── Faz 3: Sunucu-güdümlü oyun döngüsü ───────────────────────────────────
+  /// create_room'dan gelen rastgele seed (tüm clientlerde aynı soru sırası).
+  late final int _seed;
+  /// Sunucunun gönderdiği aktif soru indeksi (cevapGonder için gerekli).
+  int _aktifSoruIndex = 0;
+  /// Maç sonu sinyali geldi mi (yeniden bağlanmayı durdurmak için).
+  bool _macBitti = false;
 
   Timer? _zamanlayici;
   int kalanSure = _soruSuresi;
@@ -93,6 +122,18 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
   List<WordEntry> _havuz = const [];
   bool _havuzYukleniyor = true;
 
+  // ── Animasyon state'leri ────────────────────────────────────────────────
+  /// Floating puan popup: null = gizli, int = gösterilecek puan.
+  int? _popupPuan;
+  bool _popupGorunum = false;
+  /// Reveal sonucu göstergesi (doğru / yanlış / cevapsız).
+  String? _revealMesaj; // 'dogru' | 'yanlis' | null
+
+  // ── Sonraki soru ön-hesaplama (reveal fazında hazırlanır) ───────────────
+  QuestionModel? _sonrakiSoru;
+  WordEntry? _sonrakiKelime;
+  List<String>? _sonrakiSiklar;
+
   // Soru sırası: havuz karıştırılıp ilk _soruSayisi kadarı kullanılır — tekrar yok
   List<int> _soruSirasi = const [];
   int kacinciSoru = 0;
@@ -104,27 +145,426 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
   @override
   void initState() {
     super.initState();
+    // Faz 2/3: gerçek çok oyunculu mod tespiti
+    _matchId     = widget.odaBilgisi['matchId'] as String?;
+    _roomId      = widget.odaBilgisi['roomId']  as String?;
+    _gercekCoklu = _matchId != null && _matchId!.isNotEmpty; // ignore: unnecessary_non_null_assertion
+    // Faz 3: rooms.lua'dan gelen seed (tüm clientlerde deterministik soru sırası)
+    _seed = (widget.odaBilgisi['seed'] as num?)?.toInt() ??
+        _random.nextInt(0x7fffffff);
+
     final int kapasite = widget.odaBilgisi['kapasite'];
-    oyuncular.add({'isim': 'Sen', 'puan': 0, 'hazir': true, 'sahip': true});
-    for (int i = 1; i < kapasite; i++) {
-      oyuncular.add({
-        'isim': 'Bot $i',
-        'puan': 0,
-        'hazir': true,
-        'sahip': false,
-      });
+
+    if (_gercekCoklu) {
+      // Gerçek çok oyunculu: sadece kendimizi ekle, diğerleri presence'tan gelir.
+      oyuncular.add({'isim': 'Sen', 'puan': 0, 'hazir': false, 'sahip': true});
+      _gercekOyuncular[NakamaService.instance.userId ?? ''] =
+          AppSettings.kullaniciAdi;
+      _lobiDinlemeBaslat();
+      // Faz 4: beklenmedik soket kopuşunda yeniden bağlan
+      NakamaService.instance.onSoketKapandi = _soketKoptu;
+      // Host ise match'i oluştur (henüz oluşturulmamışsa) + odayı güncelle.
+      isOdaSahibi = widget.odaBilgisi['hostId'] == NakamaService.instance.userId;
+      // ignore: unnecessary_non_null_assertion
+      if (isOdaSahibi && (_matchId == null || _matchId!.isEmpty)) {
+        _matchOlusturVeGuncelle();
+      }
+    } else {
+      // Bot modu (eski davranış)
+      oyuncular.add({'isim': 'Sen', 'puan': 0, 'hazir': true, 'sahip': true});
+      for (int i = 1; i < kapasite; i++) {
+        oyuncular.add({'isim': 'Bot $i', 'puan': 0, 'hazir': true, 'sahip': false});
+      }
+      _botChatZamanlayici = Timer.periodic(
+        Duration(milliseconds: 4000 + _random.nextInt(4000)),
+        (_) => _botMesajiAt(),
+      );
     }
 
     // Odanın setId + tier'ından kelime havuzunu DB'den çek — tekrar yok
     final String setId = (widget.odaBilgisi['setId'] as String?) ?? 'A';
     final String tier  = (widget.odaBilgisi['tier']  as String?) ?? '1K';
     _havuzuYukle(setId, tier);
+  }
 
-    // Lobi sohbeti: botlar 4-8sn aralıklarla rastgele mock mesaj atar.
-    _botChatZamanlayici = Timer.periodic(
-      Duration(milliseconds: 4000 + _random.nextInt(4000)),
-      (_) => _botMesajiAt(),
+  // ── Faz 2: Lobi dinleme ───────────────────────────────────────────────────
+
+  void _lobiDinlemeBaslat() {
+    _presenceSub?.cancel();
+    _dataSub?.cancel();
+    _presenceSub = NakamaService.instance.onMatchPresence?.listen(_presenceGeldi);
+    _dataSub     = NakamaService.instance.onMatchData?.listen(_lobiMesajiGeldi);
+  }
+
+  // ── Faz 4: Yeniden bağlanma ───────────────────────────────────────────────
+  bool _yenidenBaglaniyor = false;
+
+  /// Soket beklenmedik kapandığında çağrılır → maç bitmemişse rejoin dener.
+  void _soketKoptu() {
+    if (!mounted || _yenidenBaglaniyor) return;
+    if (_macBitti) return; // maç zaten bittiyse uğraşma
+    _yenidenBaglan();
+  }
+
+  Future<void> _yenidenBaglan() async {
+    _yenidenBaglaniyor = true;
+    final mid = _matchId ?? widget.odaBilgisi['matchId'] as String?;
+    if (mid == null) { _yenidenBaglaniyor = false; return; }
+
+    // 3 deneme, artan bekleme ile (Prensip 3: aşırı istek atma)
+    for (int deneme = 1; deneme <= 3 && mounted && !_macBitti; deneme++) {
+      debugPrint('[Game] yeniden bağlanma denemesi $deneme/3');
+      final ok = await NakamaService.instance.soketYenidenBaglan();
+      if (ok) {
+        _lobiDinlemeBaslat();                        // yeni soket → yeni stream
+        final joined = await NakamaService.instance.macaKatil(mid);
+        if (joined != null) {
+          debugPrint('[Game] yeniden bağlanıldı, RESYNC bekleniyor');
+          _yenidenBaglaniyor = false;
+          return;                                    // sunucu RESYNC gönderecek
+        }
+      }
+      await Future.delayed(Duration(seconds: 2 * deneme));
+    }
+    _yenidenBaglaniyor = false;
+  }
+
+  void _presenceGeldi(MatchPresenceEvent event) {
+    if (!mounted) return;
+    setState(() {
+      for (final p in event.joins) {
+        if (p.userId == NakamaService.instance.userId) continue;
+        _gercekOyuncular[p.userId] = p.username;
+        final varMi = oyuncular.any((o) => o['userId'] == p.userId);
+        if (!varMi) {
+          oyuncular.add({
+            'isim':   p.username,
+            'userId': p.userId,
+            'puan':   0,
+            'hazir':  false,
+            'sahip':  false,
+          });
+        }
+      }
+      for (final p in event.leaves) {
+        oyuncular.removeWhere((o) => o['userId'] == p.userId);
+        _gercekOyuncular.remove(p.userId);
+      }
+    });
+  }
+
+  void _lobiMesajiGeldi(MatchData msg) {
+    if (!mounted) return;
+    try {
+      final data = jsonDecode(utf8.decode(msg.data ?? [])) as Map<String, dynamic>;
+
+      switch (msg.opCode) {
+        // ── Faz 2: lobi opcode'ları ───────────────────────────────────────
+        case kOpHazirDegisti:
+          final uid   = data['userId'] as String?;
+          final hazir = data['hazir']  as bool? ?? false;
+          setState(() {
+            for (final o in oyuncular) {
+              if (o['userId'] == uid) { o['hazir'] = hazir; break; }
+            }
+          });
+
+        case kOpOyunBasliyor:
+          // Faz 2 bot-mod uyumluluğu (sunucu Faz 3'te bu opcode'u göndermez)
+          if (!_gercekCoklu) {
+            final seed = (data['seed'] as num).toInt();
+            _oyunuSeedileBaslat(seed);
+          }
+
+        // ── Faz 3: sunucu-güdümlü oyun opcode'ları ───────────────────────
+        case kOpSoruGeldi:
+          final qi = (data['qi'] as num).toInt();
+          _serverSoruAc(qi);
+
+        case kOpSayacGuncellendi:
+          final sn = (data['sn'] as num).toInt();
+          if (isOyunBasladi) {
+            setState(() => kalanSure = sn);
+          }
+
+        case kOpReveal:
+          final sonuclar = data['sonuclar'] as List<dynamic>? ?? [];
+          _serverRevealIsle(sonuclar);
+
+        case kOpSkorGuncellendi:
+          final board = data['leaderboard'] as List<dynamic>? ?? [];
+          _serverSkorGuncelle(board);
+
+        case kOpMacBitti:
+          final sirali = data['sirali'] as List<dynamic>? ?? [];
+          _serverMacBitti(sirali);
+
+        case kOpResync:
+          _serverResync(data);
+      }
+    } catch (_) {}
+  }
+
+  // ── Faz 4: Yeniden bağlanınca sunucu durumunu uygula ──────────────────────
+  void _serverResync(Map<String, dynamic> data) {
+    if (!mounted) return;
+    final phase = data['phase'] as String?;
+    final qi    = (data['qi'] as num?)?.toInt() ?? 0;
+    final sn    = (data['sn'] as num?)?.toInt() ?? 10;
+    final board = data['leaderboard'] as List<dynamic>? ?? [];
+
+    _serverSkorGuncelle(board); // skorları + bot/oyuncu listesini geri yükle
+
+    if (phase == 'question') {
+      // Aktif soruyu yeniden üret ve kalan süreyi ayarla
+      if (aktifSoru == null || _aktifSoruIndex != qi) {
+        _serverSoruAc(qi);
+      }
+      setState(() => kalanSure = sn);
+    } else if (phase == 'reveal') {
+      setState(() => _revealAktif = true);
+    }
+    debugPrint('[Game] resync uygulandı: phase=$phase qi=$qi sn=$sn');
+  }
+
+  // ── Faz 3: Sunucu soru indeksi → yerel soru üret ──────────────────────────
+  void _serverSoruAc(int qi) {
+    if (!mounted) return;
+    if (_havuz.length < 5 || qi >= _soruSirasi.length) return;
+
+    final word = _havuz[_soruSirasi[qi]];
+    final yanlislar =
+        (_havuz.where((w) => w.en != word.en).toList()..shuffle(_random))
+            .take(4)
+            .map((w) => w.en)
+            .toList();
+    if (yanlislar.length < 4) return;
+
+    final soru = QuestionModel(
+      desc:    word.desc,
+      descTr:  word.descTr,
+      answer:  word.en,
+      wrong1:  yanlislar[0],
+      wrong2:  yanlislar[1],
+      wrong3:  yanlislar[2],
+      wrong4:  yanlislar[3],
     );
+    final siklar = List<String>.from(soru.allOptions)..shuffle(_random);
+
+    _aktifSoruIndex = qi;
+    kacinciSoru     = qi + 1;
+    _macdaGorunenKelimeler.add(word);
+
+    setState(() {
+      aktifSoru      = soru;
+      _aktifKelime   = word;
+      mevcutSiklar   = siklar;
+      kalanSure      = 10;
+      isOyunBasladi  = true;  // ilk soruda oyun ekranına geç
+      _secilenCevap  = null;
+      _cevapKalanSure = null;
+      _revealAktif   = false;
+      _revealMesaj   = null;
+      _popupGorunum  = false;
+      _popupPuan     = null;
+      for (final o in oyuncular) {
+        o['secim']       = null;
+        o['cevapSaniyesi'] = null;
+        o['planSn']      = null;
+        o['planSecim']   = null;
+        o['planDogru']   = null;
+      }
+    });
+  }
+
+  // ── Faz 3: Sunucu reveal sonuçlarını uygula ───────────────────────────────
+  void _serverRevealIsle(List<dynamic> sonuclar) {
+    if (!mounted) return;
+    final myId = NakamaService.instance.userId;
+
+    for (final s in sonuclar) {
+      final uid       = s['userId']   as String?;
+      final totalPuan = (s['totalPuan'] as num?)?.toInt() ?? 0;
+      final dogru     = s['dogru']    as bool? ?? false;
+      final qPuan     = (s['puan']    as num?)?.toInt() ?? 0;
+
+      // Leaderboard'u güncelle (bot satırı yoksa ekler)
+      final orow = _oyuncuBulVeyaEkle(uid, null);
+      if (orow != null && orow.isNotEmpty) orow['puan'] = totalPuan;
+
+      // "Sen"in sonucunu reveal UI'a yansıt
+      if (uid == myId && _secilenCevap != null) {
+        if (_aktifKelime != null) {
+          _cevapDurumu[_aktifKelime!.wordId] = dogru;
+        }
+        setState(() {
+          _revealMesaj = dogru ? 'dogru' : 'yanlis';
+          if (dogru) {
+            _popupPuan     = qPuan;
+            _popupGorunum  = true;
+          }
+        });
+        if (dogru) {
+          AppSettings.sesDogru();
+          Future.delayed(const Duration(milliseconds: 1400), () {
+            if (mounted) setState(() => _popupGorunum = false);
+          });
+          // Kelime sahiplenme hâlâ client-side (Faz 5'te sunucuya taşınır)
+          final word = _aktifKelime;
+          if (word != null) {
+            OwnershipEngine.claimDuelWord(
+              setId: word.setId, rank: word.rank, playerId: 'Sen',
+            ).then((result) {
+              if (!mounted || !result.claimed) return;
+              setState(() => _kazanilanKelimeler.add(word));
+            });
+          }
+        } else {
+          AppSettings.sesYanlis();
+          setState(() => _revealMesaj = 'yanlis');
+        }
+      }
+    }
+
+    // Reveal fazını başlat; sunucu 2sn sonra SORU_GELDI gönderir
+    _revealBaslat();
+  }
+
+  /// Leaderboard girişine karşılık gelen oyuncu satırını bulur; yoksa
+  /// (sunucu botu veya sonradan katılan) yeni satır ekler. Faz 4.
+  Map<String, dynamic>? _oyuncuBulVeyaEkle(String? uid, String? isim) {
+    if (uid == null) return null;
+    final myId = NakamaService.instance.userId;
+    if (uid == myId) {
+      return oyuncular.firstWhere((o) => o['isim'] == 'Sen',
+          orElse: () => oyuncular.isNotEmpty ? oyuncular.first : <String, dynamic>{});
+    }
+    for (final o in oyuncular) {
+      if (o['userId'] == uid) return o;
+    }
+    // Bilinmeyen → sunucu botu / geç katılan oyuncu: ekle
+    final yeni = {
+      'isim':  isim ?? 'Oyuncu',
+      'userId': uid,
+      'puan':  0,
+      'hazir': true,
+      'sahip': false,
+    };
+    oyuncular.add(yeni);
+    return yeni;
+  }
+
+  // ── Faz 3/4: Sunucu leaderboard'unu uygula (botlar dahil) ────────────────
+  void _serverSkorGuncelle(List<dynamic> board) {
+    if (!mounted) return;
+    setState(() {
+      for (final entry in board) {
+        final uid  = entry['userId'] as String?;
+        final puan = (entry['puan'] as num?)?.toInt() ?? 0;
+        final isim = entry['isim'] as String?;
+        final o = _oyuncuBulVeyaEkle(uid, isim);
+        if (o != null && o.isNotEmpty) {
+          o['puan'] = puan;
+          if (isim != null && o['isim'] != 'Sen') o['isim'] = isim;
+        }
+      }
+    });
+  }
+
+  // ── Faz 3: Maç bitti → ResultScreen'e geç ────────────────────────────────
+  void _serverMacBitti(List<dynamic> sirali) {
+    if (!mounted) return;
+    _macBitti = true;
+    _zamanlayici?.cancel();
+
+    // Sunucu sıralamasından oyuncu listesini yeniden kur
+    final List<Map<String, dynamic>> finalPlayers = [];
+    int? benimSira;
+    final myId = NakamaService.instance.userId;
+
+    for (final s in sirali) {
+      final uid  = s['userId'] as String?;
+      final isim = s['isim']   as String? ?? 'Oyuncu';
+      final puan = (s['puan']  as num?)?.toInt() ?? 0;
+      final sira = (s['sira']  as num?)?.toInt() ?? 0;
+      final benMiyim = uid == myId;
+      finalPlayers.add({
+        'isim':  benMiyim ? AppSettings.kullaniciAdi : isim,
+        'puan':  puan,
+        'hazir': true,
+        'sahip': benMiyim,
+        if (uid != null) 'userId': uid,
+      });
+      if (benMiyim) benimSira = sira;
+    }
+
+    // Profil sayaçlarını güncelle (hâlâ client-side)
+    if (benimSira != null) {
+      AppSettings.recordMatchResult(
+          MatchScoring.isWin(benimSira, finalPlayers.length));
+    }
+    OwnershipDb.saveMatch(
+      setId:       widget.odaBilgisi['setId'] as String,
+      tier:        widget.odaBilgisi['tier']  as String,
+      position:    benimSira ?? finalPlayers.length,
+      playerCount: finalPlayers.length,
+      words: _macdaGorunenKelimeler.map((w) => MatchWordResult(
+        wordId:        w.wordId,
+        en:            w.en,
+        tr:            w.tr,
+        desc:          w.desc,
+        descTr:        w.descTr,
+        rarity:        w.rarity,
+        correct:       _cevapDurumu[w.wordId],
+        cevapSaniyesi: _cevapSaniyesiMap[w.wordId],
+      )).toList(),
+    );
+    AppSettings.matchSavedNotifier.value++;
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ResultScreen(
+          players:            List<Map<String, dynamic>>.from(finalPlayers),
+          odaSetId:           widget.odaBilgisi['setId'] as String,
+          odaTier:            widget.odaBilgisi['tier']  as String,
+          kazanilanKelimeler: List<WordEntry>.from(_kazanilanKelimeler),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _matchOlusturVeGuncelle() async {
+    final mid = await NakamaService.instance.macOlustur();
+    if (mid == null || !mounted) return;
+    // odaBilgisi matchId'yi güncelle ki diğerleri katılabilsin
+    widget.odaBilgisi['matchId'] = mid;
+    final rid = _roomId ?? widget.odaBilgisi['roomId'] as String?;
+    if (rid != null) {
+      await NakamaService.instance.odaGuncelle(
+        roomId: rid, dolu: oyuncular.length, matchId: mid,
+      );
+    }
+    debugPrint('[Game] match oluşturuldu: $mid');
+  }
+
+  void _oyunuSeedileBaslat(int seed) {
+    // İdempotency guard — çift-tık veya çift mesaj aynı oyunu iki kez başlatmasın.
+    if (_oyunBaslatildi) return;
+    _oyunBaslatildi = true;
+
+    // Gelen seed ile soruları karıştır — tüm oyuncularda aynı sıra
+    _soruSirasi = List.generate(_havuz.length, (i) => i)
+        ..shuffle(Random(seed));
+    // Boş slotları botlarla doldur (oyun mekaniği için gerekli)
+    final kapasite = widget.odaBilgisi['kapasite'] as int;
+    int botNo = 1;
+    while (oyuncular.length < kapasite) {
+      while (_banliIsimler.contains('Bot $botNo')) { botNo++; }
+      oyuncular.add({'isim': 'Bot $botNo', 'puan': 0, 'hazir': true, 'sahip': false});
+      botNo++;
+    }
+    _geriSayimBaslat();
   }
 
   /// Tier → rank üst sınırı (rank < cap). '1K' setin tamamını açar.
@@ -144,7 +584,10 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
     if (!mounted) return;
     setState(() {
       _havuz = words;
-      _soruSirasi = List.generate(_havuz.length, (i) => i)..shuffle(_random);
+      // Faz 3: gerçek çok oyunculu modda sunucu seed'ini kullan (tüm clientler
+      // aynı soru sırasını üretir). Bot modunda rastgele karıştır.
+      _soruSirasi = List.generate(_havuz.length, (i) => i)
+        ..shuffle(_gercekCoklu ? Random(_seed) : _random);
       _havuzYukleniyor = false;
     });
   }
@@ -156,6 +599,17 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
     _geriSayimZamanlayici?.cancel();
     _chatCtrl.dispose();
     _chatScrollCtrl.dispose();
+    _presenceSub?.cancel();
+    _dataSub?.cancel();
+    // Gerçek çok oyunculu: maçtan ayrıl + odayı temizle
+    if (_gercekCoklu) {
+      // Faz 4: callback'i temizle ki kasıtlı kapanış rejoin tetiklemesin
+      NakamaService.instance.onSoketKapandi = null;
+      final mid = _matchId ?? widget.odaBilgisi['matchId'] as String?;
+      final rid = _roomId  ?? widget.odaBilgisi['roomId']  as String?;
+      if (mid != null) NakamaService.instance.macBirak(mid);
+      if (rid != null && isOdaSahibi) NakamaService.instance.odaSil(rid);
+    }
     super.dispose();
   }
 
@@ -308,7 +762,7 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
             ),
             const SizedBox(height: 6),
             Text(
-              oyuncu['isim'],
+              benMiyim ? AppSettings.kullaniciAdi : oyuncu['isim'] as String,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -479,7 +933,7 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
 
   void _oyunuBaslat() {
     final int kapasite = widget.odaBilgisi['kapasite'];
-    if (oyuncular.length < kapasite) {
+    if (!_gercekCoklu && oyuncular.length < kapasite) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Oda tam dolmadan oyun başlatılamaz!")),
       );
@@ -487,9 +941,7 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
     }
     if (!oyuncular.every((o) => o['hazir'] == true)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Herkes hazır olmadan oyun başlatılamaz!"),
-        ),
+        const SnackBar(content: Text("Herkes hazır olmadan oyun başlatılamaz!")),
       );
       return;
     }
@@ -501,7 +953,19 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
     }
     AppSettings.heavyImpact();
     _botChatZamanlayici?.cancel();
-    _geriSayimBaslat();
+
+    if (_gercekCoklu) {
+      // Faz 3: sunucu başlatır. "Başlat" butonu host'u hazır yapar.
+      // Tüm oyuncular hazır olunca sunucu countdown → SORU_GELDI gönderir.
+      setState(() {
+        isBenHazirim = true;
+        oyuncular.firstWhere((o) => o['isim'] == 'Sen')['hazir'] = true;
+      });
+      final mid = _matchId ?? widget.odaBilgisi['matchId'] as String?;
+      if (mid != null) NakamaService.instance.hazirMesajiGonder(mid, true);
+    } else {
+      _geriSayimBaslat();
+    }
   }
 
   /// "OYUNU BAŞLAT" sonrası ani geçişi yumuşatır: 3 → 2 → 1 göster, sonra
@@ -591,28 +1055,40 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
       return;
     }
 
-    // Sıradaki kelimeyi al — tekrar yok
-    final WordEntry word = _havuz[_soruSirasi[kacinciSoru]];
+    // Ön-hesaplanmış soru varsa kullan (reveal fazında hazırlandı → sıfır gecikme).
+    final WordEntry word;
+    final QuestionModel soru;
+    final List<String> siklar;
+
+    if (_sonrakiSoru != null && _sonrakiKelime != null && _sonrakiSiklar != null) {
+      word   = _sonrakiKelime!;
+      soru   = _sonrakiSoru!;
+      siklar = _sonrakiSiklar!;
+      _sonrakiSoru   = null;
+      _sonrakiKelime = null;
+      _sonrakiSiklar = null;
+    } else {
+      // Ön-hesaplama yoksa (ilk soru veya hızlı geçiş) anında hesapla.
+      word = _havuz[_soruSirasi[kacinciSoru]];
+      final yanlislar =
+          (_havuz.where((w) => w.en != word.en).toList()..shuffle(_random))
+              .take(4)
+              .map((w) => w.en)
+              .toList();
+      soru = QuestionModel(
+        desc: word.desc,
+        descTr: word.descTr,
+        answer: word.en,
+        wrong1: yanlislar[0],
+        wrong2: yanlislar[1],
+        wrong3: yanlislar[2],
+        wrong4: yanlislar[3],
+      );
+      siklar = List<String>.from(soru.allOptions)..shuffle(_random);
+    }
+
     kacinciSoru++;
     _macdaGorunenKelimeler.add(word); // geçmiş kaydı için
-
-    // 4 yanlış şıkkı aynı lig havuzundan rastgele seç (zorluk seviyesi eşleşsin)
-    final yanlislar =
-        (_havuz.where((w) => w.en != word.en).toList()..shuffle(_random))
-            .take(4)
-            .map((w) => w.en)
-            .toList();
-
-    final soru = QuestionModel(
-      desc: word.desc,
-      descTr: word.descTr,
-      answer: word.en,
-      wrong1: yanlislar[0],
-      wrong2: yanlislar[1],
-      wrong3: yanlislar[2],
-      wrong4: yanlislar[3],
-    );
-    final siklar = List<String>.from(soru.allOptions)..shuffle(_random);
 
     setState(() {
       aktifSoru = soru;
@@ -622,6 +1098,9 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
       _secilenCevap = null;
       _cevapKalanSure = null;
       _revealAktif = false;
+      _revealMesaj = null;
+      _popupGorunum = false;
+      _popupPuan = null;
       for (final o in oyuncular) {
         o['secim'] = null;
         o['cevapSaniyesi'] = null;
@@ -665,17 +1144,42 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
     return true;
   }
 
-  /// Reveal fazını başlatır: timer durmuş olur, 2 sn boyunca doğru cevap
-  /// (ve kullanıcının yanlış seçimi) renkli vurgulanır, sonra yeni soruya
-  /// geçer.
+  /// Reveal fazını başlatır.
+  /// Bot modunda 2sn sonra _yeniSoruHazirla çağrılır.
+  /// Gerçek modda (Faz 3) sonraki soruyu sunucu kOpSoruGeldi ile tetikler.
   void _revealBaslat() {
     if (_revealAktif) return;
     _zamanlayici?.cancel();
     setState(() => _revealAktif = true);
+    if (_gercekCoklu) return; // sunucu SORU_GELDI → _serverSoruAc ile çıkış
+    _sonrakiSoruHazirla(); // bot modunda ön-hesapla
     Future.delayed(const Duration(seconds: 2), () {
       if (!mounted) return;
       _yeniSoruHazirla();
     });
+  }
+
+  /// Reveal fazında arka planda bir sonraki soruyu hazırlar.
+  void _sonrakiSoruHazirla() {
+    if (kacinciSoru >= toplamSoru) return;
+    final word = _havuz[_soruSirasi[kacinciSoru]];
+    final yanlislar =
+        (_havuz.where((w) => w.en != word.en).toList()..shuffle(_random))
+            .take(4)
+            .map((w) => w.en)
+            .toList();
+    if (yanlislar.length < 4) return; // havuz küçükse ön-hesaplama atla
+    _sonrakiSoru = QuestionModel(
+      desc: word.desc,
+      descTr: word.descTr,
+      answer: word.en,
+      wrong1: yanlislar[0],
+      wrong2: yanlislar[1],
+      wrong3: yanlislar[2],
+      wrong4: yanlislar[3],
+    );
+    _sonrakiKelime = word;
+    _sonrakiSiklar = List<String>.from(_sonrakiSoru!.allOptions)..shuffle(_random);
   }
 
   /// Kullanıcı bir şıkka tıkladığında: sadece seçim kaydedilir. Doğru/yanlış
@@ -685,14 +1189,25 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
     if (!isOyunBasladi || _revealAktif || aktifSoru == null) return;
     if (_secilenCevap != null) return; // çift tap koruması
     AppSettings.mediumImpact();
+    final bool dogru = secilenCevap == aktifSoru!.answer;
     setState(() {
-      _secilenCevap = secilenCevap;
-      _cevapKalanSure = kalanSure; // hız bonusu için anlık süre
-      // Sen'in avatarı seçilen şıkkın üst kenarında ANINDA görünsün.
+      _secilenCevap   = secilenCevap;
+      _cevapKalanSure = kalanSure;
       final ben = oyuncular.firstWhere((o) => o['isim'] == 'Sen');
-      ben['secim'] = secilenCevap;
+      ben['secim']       = secilenCevap;
       ben['cevapSaniyesi'] = kalanSure;
     });
+    if (_gercekCoklu) {
+      // Faz 3: cevabı sunucuya gönder — sunucu skoru hesaplar
+      final mid = _matchId ?? widget.odaBilgisi['matchId'] as String?;
+      if (mid != null) {
+        NakamaService.instance.cevapGonder(mid, _aktifSoruIndex, dogru);
+      }
+      // Maç geçmişi için yerel kayıt (cevap saniyesi)
+      if (_aktifKelime != null) {
+        _cevapSaniyesiMap[_aktifKelime!.wordId] = kalanSure;
+      }
+    }
   }
 
   /// Timer 0 anında soruyu sonuçlandırır: doğru ise puan + claim + snackbar,
@@ -715,12 +1230,18 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
 
     if (secilen != null && secilen == dogru) {
       AppSettings.sesDogru();
-      // Hız bonusu: cap'li (sn > 5 → sn; sn ≤ 5 → 3 sabit).
       final int sn = _cevapKalanSure ?? 0;
       final int kazanilanPuan = _puanHesapla(sn);
       setState(() {
         final benimOyuncu = oyuncular.firstWhere((o) => o['isim'] == 'Sen');
         benimOyuncu['puan'] = (benimOyuncu['puan'] as int) + kazanilanPuan;
+        _revealMesaj = 'dogru';
+        _popupPuan = kazanilanPuan;
+        _popupGorunum = true;
+      });
+      // Popup 1.4sn sonra kaybolur
+      Future.delayed(const Duration(milliseconds: 1400), () {
+        if (mounted) setState(() => _popupGorunum = false);
       });
       final word = _aktifKelime;
       if (word != null) {
@@ -733,33 +1254,11 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
           setState(() => _kazanilanKelimeler.add(word));
         });
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "DOĞRU! +$kazanilanPuan Puan",
-            style: const TextStyle(
-              color: Colors.black,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          backgroundColor: Colors.greenAccent,
-          duration: const Duration(milliseconds: 1500),
-        ),
-      );
     } else if (secilen != null) {
       AppSettings.sesYanlis();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "YANLIŞ!",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: Colors.redAccent,
-          duration: Duration(milliseconds: 1500),
-        ),
-      );
+      setState(() => _revealMesaj = 'yanlis');
     }
-    // secilen == null → kullanıcı hiç tıklamadı, snackbar atma; sadece reveal.
+    // secilen == null → cevapsız; sadece reveal.
 
     // Botların puanlarını reveal anında topluca yaz — leaderboard tek
     // seferde oturur, planSn tick'lerinde sızıntı olmaz.
@@ -892,21 +1391,97 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                child: SizedBox.expand(
-                  child: _geriSayim != null
-                      ? _geriSayimEkrani()
-                      : !isOyunBasladi
-                          ? _lobiSohbeti()
-                          : (aktifSoru != null && _aktifKelime != null)
-                              ? RarityQuestionCard(
-                                  rarity: _aktifKelime!.rarity,
-                                  questionText: aktifSoru!.desc,
-                                  timerSeconds: kalanSure,
-                                  hintText: kalanSure <= 5
-                                      ? aktifSoru!.descTr
-                                      : null,
-                                )
-                              : _bekleniyorKarti(),
+                child: Stack(
+                  children: [
+                    SizedBox.expand(
+                      child: _geriSayim != null
+                          ? _geriSayimEkrani()
+                          : !isOyunBasladi
+                              ? _lobiSohbeti()
+                              : (aktifSoru != null && _aktifKelime != null)
+                                  // Geçiş efekti yok → soru anında değişir,
+                                  // kasma sıfır (iki kart üst üste gelmez).
+                                  ? RarityQuestionCard(
+                                      rarity: _aktifKelime!.rarity,
+                                      questionText: aktifSoru!.desc,
+                                      timerSeconds: kalanSure,
+                                      hintText: kalanSure <= 5
+                                          ? aktifSoru!.descTr
+                                          : null,
+                                    )
+                                  : _bekleniyorKarti(),
+                    ),
+                    // ── Floating puan popup ────────────────────────────
+                    if (_popupPuan != null)
+                      Positioned(
+                        bottom: 40,
+                        left: 0,
+                        right: 0,
+                        // Yükselme Transform tabanlı (AnimatedSlide) → layout yok.
+                        child: AnimatedSlide(
+                          offset: _popupGorunum
+                              ? Offset.zero
+                              : const Offset(0, 0.4),
+                          duration: const Duration(milliseconds: 600),
+                          curve: Curves.easeOut,
+                          child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 400),
+                          opacity: _popupGorunum ? 1.0 : 0.0,
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.greenAccent.withValues(alpha: 0.92),
+                                borderRadius: BorderRadius.circular(30),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.greenAccent.withValues(alpha: 0.4),
+                                    blurRadius: 16,
+                                    spreadRadius: 2,
+                                  ),
+                                ],
+                              ),
+                              child: Text(
+                                '+$_popupPuan Puan',
+                                style: const TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        ),
+                      ),
+                    // ── Inline reveal mesajı ──────────────────────────
+                    if (_revealMesaj == 'yanlis')
+                      Positioned(
+                        bottom: 12,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 18, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: AppColors.kirmizi.withValues(alpha: 0.9),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'YANLIŞ',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -970,6 +1545,21 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
                                   (o) => o['isim'] == 'Sen',
                                 )['hazir'] = isBenHazirim;
                               });
+                              // Gerçek çok oyunculu: 400ms throttle ile hazır mesajı gönder
+                              if (_gercekCoklu) {
+                                final now = DateTime.now();
+                                final son = _sonHazirGonderim;
+                                if (son == null ||
+                                    now.difference(son).inMilliseconds >= 400) {
+                                  _sonHazirGonderim = now;
+                                  final mid = _matchId ??
+                                      widget.odaBilgisi['matchId'] as String?;
+                                  if (mid != null) {
+                                    NakamaService.instance.hazirMesajiGonder(
+                                        mid, isBenHazirim);
+                                  }
+                                }
+                              }
                             },
                             child: Container(
                               width: double.infinity,
@@ -1339,10 +1929,11 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
     final List<Map<String, dynamic>> seciler = secimleriGoster
         ? oyuncular.where((o) => o['secim'] == metin).toList()
         : const [];
-    return GestureDetector(
-      onTap: tikSiklarKilitli ? null : () => _cevapKontrol(metin),
+    return _TapScale(
+      disabled: tikSiklarKilitli,
+      onTap: () => _cevapKontrol(metin),
       child: Stack(
-        clipBehavior: Clip.none, // avatar kutudan dışarı taşabilir
+        clipBehavior: Clip.none,
         alignment: Alignment.center,
         children: [
           AnimatedContainer(
@@ -1377,7 +1968,16 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (final o in seciler) _miniAvatarSecim(o),
+                  for (final o in seciler)
+                    TweenAnimationBuilder<double>(
+                      key: ValueKey('${o['isim']}_$metin'),
+                      tween: Tween(begin: 0.0, end: 1.0),
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.elasticOut,
+                      builder: (_, scale, child) =>
+                          Transform.scale(scale: scale, child: child),
+                      child: _miniAvatarSecim(o),
+                    ),
                 ],
               ),
             ),
@@ -1408,6 +2008,42 @@ class _OyunOdasiEkraniState extends State<OyunOdasiEkrani> {
             color: benMiyim ? AppColors.sari : Colors.white70,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Tıklandığında hafifçe küçülen (0.94×) basılma hissi veren widget.
+class _TapScale extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+  final bool disabled;
+
+  const _TapScale({
+    required this.child,
+    required this.onTap,
+    this.disabled = false,
+  });
+
+  @override
+  State<_TapScale> createState() => _TapScaleState();
+}
+
+class _TapScaleState extends State<_TapScale> {
+  bool _basili = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.disabled ? null : widget.onTap,
+      onTapDown: widget.disabled ? null : (_) => setState(() => _basili = true),
+      onTapUp: widget.disabled ? null : (_) => setState(() => _basili = false),
+      onTapCancel: widget.disabled ? null : () => setState(() => _basili = false),
+      child: AnimatedScale(
+        scale: _basili ? 0.94 : 1.0,
+        duration: const Duration(milliseconds: 80),
+        curve: Curves.easeOut,
+        child: widget.child,
       ),
     );
   }

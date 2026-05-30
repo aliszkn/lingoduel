@@ -20,6 +20,7 @@ class AppSettings {
   static const _kToplamMac          = 'toplam_mac';
   static const _kKazanilanMac       = 'kazanilan_mac';
   static const _kKazanmaSerisi      = 'kazanma_serisi';
+  static const _kKullaniciAdi      = 'kullanici_adi';
 
   /// Bir maç kaydedildiğinde value artırılır.
   /// ProfilePanel bunu dinleyip geçmişi otomatik yeniler.
@@ -50,6 +51,9 @@ class AppSettings {
   /// Üst üste galibiyet sayısı. Galibiyette artar, kayıpta sıfırlanır.
   static int kazanmaSerisi = 0;
 
+  /// Profil ekranında ve oyun kartında görünen kullanıcı adı.
+  static String kullaniciAdi = 'LingoUstası99';
+
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     sfxAcik = _prefs.getBool(_kSfx) ?? true;
@@ -62,6 +66,7 @@ class AppSettings {
     toplamMac          = _prefs.getInt(_kToplamMac) ?? 0;
     kazanilanMac       = _prefs.getInt(_kKazanilanMac) ?? 0;
     kazanmaSerisi      = _prefs.getInt(_kKazanmaSerisi) ?? 0;
+    kullaniciAdi       = _prefs.getString(_kKullaniciAdi) ?? 'LingoUstası99';
   }
 
   /// Maç sonunda çağrılır. [won] galibiyet yarısında (üst yarı) bitirildiyse true.
@@ -123,26 +128,53 @@ class AppSettings {
     }
   }
 
+  static Future<void> setKullaniciAdi(String isim) async {
+    kullaniciAdi = isim.trim().isEmpty ? 'LingoUstası99' : isim.trim();
+    await _prefs.setString(_kKullaniciAdi, kullaniciAdi);
+  }
+
   static Future<void> resetSoftStart() async {
     softStartCompleted = false;
     await _prefs.setBool(_kSoftStartCompleted, false);
   }
 
   // ── Ses wrapper'lar ─ sfxAcik kapalıysa hiçbir şey yapmaz ───────────────
-  static final _player = AudioPlayer();
+  // Her ses için ayrı player → önceden yüklenir, gecikme sıfırlanır.
+  static final _pDogru     = AudioPlayer();
+  static final _pYanlis    = AudioPlayer();
+  static final _pKazanma   = AudioPlayer();
+  static final _pKaybetme  = AudioPlayer();
 
-  static Future<void> _ses(String dosya) async {
-    if (!sfxAcik) return;
+  /// Açılışta: her player'ı SFX için yapılandır + asset baytlarını ısıt.
+  /// ReleaseMode.stop → ses bitince kaynak serbest bırakılmaz, tekrar çalar.
+  static Future<void> sesPreload() async {
+    for (final p in [_pDogru, _pYanlis, _pKazanma, _pKaybetme]) {
+      try {
+        await p.setReleaseMode(ReleaseMode.stop);
+      } catch (_) {}
+    }
     try {
-      await _player.stop();
-      await _player.play(AssetSource('sesler/$dosya'));
+      await Future.wait([
+        _pDogru.setSource(AssetSource('sesler/dogru.mp3')),
+        _pYanlis.setSource(AssetSource('sesler/yanlis.mp3')),
+        _pKazanma.setSource(AssetSource('sesler/mac_kazanma.mp3')),
+        _pKaybetme.setSource(AssetSource('sesler/mac_kaybetme.mp3')),
+      ]);
     } catch (_) {}
   }
 
-  static Future<void> sesDogru()       => _ses('dogru.mp3');
-  static Future<void> sesYanlis()      => _ses('yanlis.mp3');
-  static Future<void> sesMacKazanma() => _ses('mac_kazanma.mp3');
-  static Future<void> sesMacKaybetme() => _ses('mac_kaybetme.mp3');
+  static Future<void> _calar(AudioPlayer p, String dosya) async {
+    if (!sfxAcik) return;
+    try {
+      await p.stop();                              // önceki çalmayı sıfırla
+      await p.play(AssetSource('sesler/$dosya'));  // baştan çal (güvenilir)
+    } catch (_) {}
+  }
+
+  static Future<void> sesDogru()        => _calar(_pDogru,    'dogru.mp3');
+  static Future<void> sesYanlis()       => _calar(_pYanlis,   'yanlis.mp3');
+  static Future<void> sesMacKazanma()   => _calar(_pKazanma,  'mac_kazanma.mp3');
+  static Future<void> sesMacKaybetme()  => _calar(_pKaybetme, 'mac_kaybetme.mp3');
 
   // ── Haptik wrapper'lar ─ titresimAcik kapalıysa hiçbir şey yapmaz ────────
   static void lightImpact() {

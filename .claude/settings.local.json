@@ -8,7 +8,8 @@
       "Bash(flutter build *)",
       "Bash(flutter run *)",
       "Bash(dart run *)",
-      "Bash(dart *)"
+      "Bash(dart *)",
+      "Bash(grep -v \"^Analyzing\\\\|^$\\\\|use_null_aware_elements\\\\|unnecessary_non_null\")"
     ]
   }
 }

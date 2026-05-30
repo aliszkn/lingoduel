@@ -1,0 +1,66 @@
+# LingoDuel — Lokal Nakama sunucusu (geliştirme)
+# Çalıştırma:  cd server && docker compose up
+# Konsol:      http://127.0.0.1:7351  (kullanıcı: admin / şifre: password)
+# Client bağlantısı: host 127.0.0.1, httpPort 7350, serverKey "defaultkey"
+#
+# Not: Bu yalnızca LOKAL geliştirme içindir. Production'da serverKey,
+# DB şifresi ve console parolası değiştirilmeli, SSL açılmalı.
+
+version: '3'
+
+services:
+  postgres:
+    image: postgres:12-alpine
+    container_name: lingoduel_postgres
+    environment:
+      - POSTGRES_DB=nakama
+      - POSTGRES_PASSWORD=localdb
+    volumes:
+      - data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "nakama"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  nakama:
+    image: heroiclabs/nakama:3.21.1
+    container_name: lingoduel_nakama
+    entrypoint:
+      - "/bin/sh"
+      - "-ecx"
+      - >
+        /nakama/nakama migrate up --database.address postgres:localdb@postgres:5432/nakama &&
+        exec /nakama/nakama
+        --name nakama1
+        --database.address postgres:localdb@postgres:5432/nakama
+        --logger.level DEBUG
+        --session.token_expiry_sec 7200
+        --console.username admin
+        --console.password password
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./modules:/nakama/data/modules
+    expose:
+      - "7349"
+      - "7350"
+      - "7351"
+    ports:
+      - "7349:7349"   # gRPC API
+      - "7350:7350"   # HTTP API (Flutter client buraya bağlanır)
+      - "7351:7351"   # Konsol (web yönetim paneli)
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  data:

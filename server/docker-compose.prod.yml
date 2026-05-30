@@ -1,0 +1,74 @@
+# LingoDuel — Nakama PRODUCTION sunucusu (Faz 5)
+# Çalıştırma:  cd server && docker compose -f docker-compose.prod.yml up -d
+#
+# TÜM gizli değerler .env dosyasından okunur (bu klasörde .env oluştur):
+#   POSTGRES_PASSWORD=...        (güçlü, rastgele)
+#   NAKAMA_SERVER_KEY=...        (client'ın kullanacağı anahtar; defaultkey DEĞİL)
+#   NAKAMA_CONSOLE_USER=...
+#   NAKAMA_CONSOLE_PASSWORD=...  (güçlü)
+#   NAKAMA_ENCRYPTION_KEY=...    (32+ karakter; session token imzası)
+#
+# .env dosyasını ASLA git'e ekleme (.gitignore'da olmalı).
+# SSL: Nakama'yı doğrudan internete açma; önüne TLS sonlandıran bir
+# reverse proxy (Caddy/Nginx/Traefik) koy ve 443 → 7350'ye yönlendir.
+
+services:
+  postgres:
+    image: postgres:12-alpine
+    container_name: lingoduel_postgres_prod
+    environment:
+      - POSTGRES_DB=nakama
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD gerekli}
+    volumes:
+      - data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    # Production'da 5432'yi DIŞARI AÇMA (ports yok → sadece iç ağ).
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "nakama"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  nakama:
+    image: heroiclabs/nakama:3.21.1
+    container_name: lingoduel_nakama_prod
+    entrypoint:
+      - "/bin/sh"
+      - "-ecx"
+      - >
+        /nakama/nakama migrate up
+        --database.address postgres:${POSTGRES_PASSWORD}@postgres:5432/nakama &&
+        exec /nakama/nakama
+        --name nakama_prod
+        --database.address postgres:${POSTGRES_PASSWORD}@postgres:5432/nakama
+        --logger.level INFO
+        --session.token_expiry_sec 7200
+        --socket.server_key "${NAKAMA_SERVER_KEY}"
+        --runtime.http_key "${NAKAMA_HTTP_KEY:-$NAKAMA_SERVER_KEY}"
+        --session.encryption_key "${NAKAMA_ENCRYPTION_KEY}"
+        --console.username "${NAKAMA_CONSOLE_USER}"
+        --console.password "${NAKAMA_CONSOLE_PASSWORD}"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./modules:/nakama/data/modules
+    expose:
+      - "7349"
+      - "7350"
+      - "7351"
+    ports:
+      # Yalnız HTTP API'yi (reverse proxy'nin arkasında) aç.
+      # Konsol 7351'i public AÇMA — SSH tüneli veya VPN ile eriş.
+      - "7350:7350"
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  data:

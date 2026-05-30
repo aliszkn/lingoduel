@@ -18,7 +18,7 @@ import '../game/word_rarity.dart';
 ///   timerSeconds: 8,
 /// )
 /// ```
-class RarityQuestionCard extends StatefulWidget {
+class RarityQuestionCard extends StatelessWidget {
   const RarityQuestionCard({
     super.key,
     required this.rarity,
@@ -49,56 +49,33 @@ class RarityQuestionCard extends StatefulWidget {
   };
 
   @override
-  State<RarityQuestionCard> createState() => _RarityQuestionCardState();
-}
-
-class _RarityQuestionCardState extends State<RarityQuestionCard>
-    with SingleTickerProviderStateMixin {
-  // CSS `pulse-*` animasyonu 3sn'lik bir döngü (ease-in-out). Burada 1.5sn
-  // ileri + 1.5sn geri (reverse) = 3sn toplam, aynı nefes alma hissi.
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1500),
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final rarity = widget.rarity;
     final accent = rarity.color; // kenarlık + etiket + rozet vurgusu
     final gradient = RarityQuestionCard._gradient[rarity]!;
     const radius = BorderRadius.all(Radius.circular(24));
 
-    return AnimatedBuilder(
-      animation: _pulse,
-      builder: (context, child) {
-        final t = Curves.easeInOut.transform(_pulse.value);
-        return Container(
-          decoration: BoxDecoration(
-            borderRadius: radius,
-            boxShadow: [
-              // CSS: 0 0 (20→40)px (2→10)px rgba(accent, 0.2→0.4)
-              BoxShadow(
-                color: accent.withValues(alpha: 0.2 + 0.2 * t),
-                blurRadius: 20 + 20 * t,
-                spreadRadius: 2 + 8 * t,
-              ),
-            ],
-          ),
-          child: child,
-        );
-      },
-      child: Material(
+    // Statik glow: animasyon yok → RepaintBoundary içeriği değişmez,
+    // soru geçişinde (AnimatedSwitcher fade) cache'lenmiş layer ucuza
+    // kompozit edilir. Eskiden sonsuz blur pulse her karede yeniden
+    // çiziliyordu (kasmanın ana kaynağı).
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: radius,
+          boxShadow: [
+            BoxShadow(
+              color: accent.withValues(alpha: 0.28),
+              blurRadius: 14,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: Material(
         color: Colors.transparent,
         borderRadius: radius,
-        clipBehavior: Clip.antiAlias, // overflow: hidden → mücevheri kırpar
+        clipBehavior: Clip.hardEdge, // mücevheri kırpar; hardEdge antialias'tan ucuz
         child: InkWell(
-          onTap: widget.onTap,
+          onTap: onTap,
           child: Ink(
             decoration: BoxDecoration(
               borderRadius: radius,
@@ -161,7 +138,7 @@ class _RarityQuestionCardState extends State<RarityQuestionCard>
                       ),
                       const SizedBox(height: 24),
                       Text(
-                        widget.questionText,
+                        questionText,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.white,
@@ -177,7 +154,7 @@ class _RarityQuestionCardState extends State<RarityQuestionCard>
                           ],
                         ),
                       ),
-                      if (widget.hintText != null) ...[
+                      if (hintText != null) ...[
                         const SizedBox(height: 14),
                         Container(
                           height: 1,
@@ -185,7 +162,7 @@ class _RarityQuestionCardState extends State<RarityQuestionCard>
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          widget.hintText!,
+                          hintText!,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: Colors.white.withValues(alpha: 0.78),
@@ -204,7 +181,7 @@ class _RarityQuestionCardState extends State<RarityQuestionCard>
                         ),
                       ],
                       const SizedBox(height: 24),
-                      _TimerBadge(accent: accent, seconds: widget.timerSeconds),
+                      _TimerBadge(accent: accent, seconds: timerSeconds),
                         ],
                       ),
                     ),
@@ -214,6 +191,7 @@ class _RarityQuestionCardState extends State<RarityQuestionCard>
             ),
           ),
         ),
+      ),
       ),
     );
   }
